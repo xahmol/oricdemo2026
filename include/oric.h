@@ -86,6 +86,37 @@ typedef volatile struct {
 #define CHARSETROM      0xFC78U
 
 // -------------------------------------------------------------------------
+// HIRES bitmap ($A000-$BF3F) -- see include/hires.h for the drawing library.
+//
+// 40 bytes/scanline x 200 scanlines, simple linear raster (byte address =
+// HIRESVRAM + y*HIRES_ROW_BYTES + x/6 -- NOT cell-interleaved like a C64
+// bitmap). Pixel byte: bit7 = invert, bit6 MUST be 1 (else the ULA reads
+// the byte as a serial attribute per the (byte & 0x60) == 0 rule below),
+// bits5-0 = 6 pixels, bit5 = leftmost. All-ink byte = 0x7F, all-paper = 0x40.
+//
+// $BF40-$BF67 (42 bytes) are unused, then a built-in 3-line TEXT footer at
+// HIRES_FOOTER ($BF68-$BFDF, 120 bytes), rendered with normal TEXT-mode
+// rules using the HIRES-mode charset banks below.
+//
+// While HIRES mode governs the screen, charset RAM relocates: it does NOT
+// stay at CHARSET_STD/CHARSET_ALT above (that address range is reused as
+// HIRES bitmap data) -- use HIRES_CHARSET_STD/ALT instead.
+// -------------------------------------------------------------------------
+
+#define HIRESVRAM           0xA000U   // Base of the 8000-byte HIRES bitmap
+#define HIRES_ROW_BYTES     40
+#define HIRES_ROWS          200
+#define HIRES_WIDTH_PX      240        // HIRES_ROW_BYTES * 6
+#define HIRES_SIZE          8000U      // HIRES_ROW_BYTES * HIRES_ROWS
+
+#define HIRES_FOOTER_UNUSED 0xBF40U    // 42 unused bytes before the footer
+#define HIRES_FOOTER        0xBF68U    // Built-in 3-line TEXT footer
+#define HIRES_FOOTER_ROWS   3
+
+#define HIRES_CHARSET_STD   0x9800U    // Standard charset bank base (HIRES mode only)
+#define HIRES_CHARSET_ALT   0x9C00U    // Alternate charset bank base (HIRES mode only)
+
+// -------------------------------------------------------------------------
 // Serial attribute codes (write to screen RAM with bit 6 = 0)
 // A byte in screen RAM with bit 6 = 0: serial attribute, affects rest of row
 // A byte in screen RAM with bit 6 = 1: display character from character ROM
@@ -120,6 +151,27 @@ typedef volatile struct {
 #define A_BLINKALT     13    // Blinking alternate charset
 #define A_BLINK2H      14    // Double-height blinking standard charset
 #define A_BLINK2HALT   15    // Double-height blinking alternate charset
+
+// -------------------------------------------------------------------------
+// TEXT/HIRES mode-switch attributes.
+//
+// Placing one of these as the LAST column byte (column 39) of whichever
+// mode currently governs a scanline switches the display mode starting the
+// NEXT scanline -- it is not an instant, whole-screen switch. See
+// include/hires.h's hires_on()/hires_off()/hires_footer_enable() for the
+// standard usage patterns (poke at TEXTVRAM+39 to enter HIRES from a TEXT
+// screen; poke at HIRESVRAM+196*HIRES_ROW_BYTES+39 to carve out the 3-line
+// HIRES_FOOTER at the bottom of a HIRES screen).
+//
+// Each pair (e.g. 24/25) is a duplicate in the ULA; the 50Hz/60Hz distinction
+// matters for PAL vs NTSC hardware (Oric Atmos in Europe is PAL/50Hz).
+// -------------------------------------------------------------------------
+
+#define A_TEXT_60HZ    24    // Switch to TEXT mode, 60Hz (NTSC)
+#define A_TEXT_50HZ    26    // Switch to TEXT mode, 50Hz (PAL)
+#define A_HIRES_60HZ   28    // Switch to HIRES mode, 60Hz (NTSC) -- same as A_HIRES
+#define A_HIRES_50HZ   30    // Switch to HIRES mode, 50Hz (PAL)
+
 #define A_HIRES        28    // Switch to HIRES mode (do not use in text apps)
 
 // -------------------------------------------------------------------------

@@ -97,6 +97,36 @@ MAIN_SRCS = \
   include/loci.h
 
 # -------------------------------------------------------------------------
+# HIRES test fixture -- separate program, built with the alternate
+# oric_crt_hires.c runtime (shrunk main/stack regions, see that file).
+# Not part of 'all'/'zip'/'usb' -- only used by 'make test-hires'.
+# -------------------------------------------------------------------------
+
+MAIN_HIRES       = hires_test
+PROGNAME_HIRES   = HIRESTEST
+
+CFLAGS_HIRES = \
+  -n              \
+  -tf=bin         \
+  -rt=include/oric_crt_hires.c \
+  -i=include      \
+  -i=src          \
+  -i=tests/fixtures \
+  -O2             \
+  -dNOFLOAT
+
+MAIN_HIRES_SRCS = \
+  src/hires_test.c        \
+  include/oric_crt_hires.c \
+  include/crt_math.c     \
+  include/oric.h         \
+  include/hires.c        \
+  include/hires.h        \
+  include/ttf.c          \
+  include/ttf.h          \
+  tests/fixtures/ttf_test_font.h
+
+# -------------------------------------------------------------------------
 # USB stick transfer -- variable declarations
 # -------------------------------------------------------------------------
 # Set USBPATH in .env (gitignored) -- path to the directory on the USB stick.
@@ -141,7 +171,7 @@ CYCLES   ?= 8000000
 # all: must appear first so it is the default goal
 # =========================================================================
 
-.PHONY: all clean run docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test
+.PHONY: all clean run docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv
 
 all: build/$(MAIN).tap
 
@@ -156,6 +186,18 @@ build/$(MAIN).tap: build/$(MAIN).bin
 	    build/$(MAIN).bin \
 	    build/$(MAIN).tap \
 	    $(PROGNAME) \
+	    $(LOAD_ADDR)
+
+# HIRES test fixture -- see MAIN_HIRES_SRCS/CFLAGS_HIRES above.
+build/$(MAIN_HIRES).bin: $(MAIN_HIRES_SRCS)
+	@$(MKDIR) build 2>$(NULLDEV) ; true
+	$(CC) $(CFLAGS_HIRES) -o=build/$(MAIN_HIRES).bin src/hires_test.c
+
+build/$(MAIN_HIRES).tap: build/$(MAIN_HIRES).bin
+	$(PY) tools/mktap.py \
+	    build/$(MAIN_HIRES).bin \
+	    build/$(MAIN_HIRES).tap \
+	    $(PROGNAME_HIRES) \
 	    $(LOAD_ADDR)
 
 # Launch in Oricutron (must cd to oricutron dir -- it loads ROMs from cwd).
@@ -234,6 +276,32 @@ test-boot: check-phosphoric sandbox-reset
 
 test:
 	$(MAKE) test-boot
+	$(MAKE) test-pictconv
+
+# oric_pictconv.py unit test -- pure Python, no emulator, fast enough to
+# fold into the default 'make test' (unlike test-hires, which needs a slow
+# Phosphoric run and a second .tap build, so stays separate/opt-in).
+check-pictconv:
+	@python3 -c "import PIL" 2>$(NULLDEV) || \
+	    (echo "ERROR: Pillow not installed -- run: pip install -r tools/requirements.txt" && false)
+
+test-pictconv: check-pictconv
+	python3 tests/scripts/test_pictconv.py
+
+# HIRES library test (separate/opt-in -- not part of 'make test' since it
+# needs a second .tap build with the alternate oric_crt_hires.c runtime).
+sandbox-reset-hires: build/$(MAIN_HIRES).tap
+	$(RMDIR) tests/sandbox 2>$(NULLDEV) ; true
+	$(MKDIR) tests/sandbox 2>$(NULLDEV) ; true
+	cp -r tests/fixtures/. tests/sandbox/
+	find tests/sandbox -name '.gitkeep' -delete
+	cp build/$(MAIN_HIRES).tap tests/sandbox/
+
+test-hires: check-phosphoric sandbox-reset-hires
+	$(MKDIR) tests/out 2>$(NULLDEV) ; true
+	PHOS=$(PHOS) ATMOSROM=$(ATMOSROM) SANDBOX=tests/sandbox OUT=tests/out \
+	    TAPFILE=$(MAIN_HIRES).tap \
+	    bash tests/scripts/test_hires.sh
 
 # -------------------------------------------------------------------------
 # Documentation -- generate PDF from Markdown (requires pandoc)
