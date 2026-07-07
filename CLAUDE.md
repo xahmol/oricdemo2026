@@ -70,13 +70,24 @@ make clean
     Degrades gracefully when no LOCI device is attached (`loci_present()` returns
     false; don't gate the whole program on it unless the demo actually needs
     LOCI-backed storage).
-  - `hires.c/h` — HIRES-mode bitmap graphics library (pixel/line/shape/bitblit/
-    text primitives, mode switching, ink/paper attributes, AIC). Requires the
-    `oric_crt_hires.c` runtime. See `docs/hires.md`.
+  - `hires.c/h` — HIRES-mode bitmap graphics library (pixel/line/scroll/shape/
+    pattern-fill/flood-fill/bitblit/text primitives, mode switching, ink/paper
+    attributes, AIC). Requires the `oric_crt_hires.c` runtime. See `docs/hires.md`.
   - `ttf.c/h` — proportional bitmap-font rendering on top of `hires.c`, fed by
     `tools/oric_ttfconv.py`. See `docs/ttf.md`.
   - `vector3d.c/h` — 3D vector/matrix math, copied verbatim from Oscar64's own
     `include/gfx/`. Not currently used by any demo code. See `docs/vector3d.md`.
+  - `fixedmath.c/h` — 256-entry fixed-point sine/cosine table (fast plasma/
+    sinus-scroll effects). Generic, not HIRES-specific. See `docs/fixedmath.md`.
+  - `sprite.c/h` — "save-under" sprite system on top of `hires.c`'s `hb_bitblit`.
+    See `docs/sprite.md`.
+  - `dissolve.c/h` — fade/dissolve transitions (strided attribute fade + LFSR
+    pixel dissolve) for HIRES mode. See `docs/dissolve.md`.
+  - `rasterirq.c/h` — raster IRQ / mid-frame colour-split effects via a
+    self-contained VIA Timer 1 handler. The only module that enables
+    interrupts (`hrirq_start()`) — everything else in this project runs with
+    interrupts permanently disabled. See `docs/rasterirq.md` **before** using
+    it, especially the `__interrupt`-callback and VIA-Port-A-hazard notes.
 - `tools/mktap.py` — wraps an Oscar64 raw `.bin` in an Oric `.tap` tape header.
 - `tools/oric_pictconv.py` — JPG/PNG -> HIRES bitmap converter (mono/colored/aic
   modes). See `docs/pictconv.md`.

@@ -25,7 +25,7 @@ SCREEN=tests/scripts/oric_screen.py
 # Cycle count -- must be large enough for Phosphoric's fast-load (tape
 # search + BASIC boot) to finish before the program itself runs, same
 # ballpark as test_boot.sh, even though this program's own logic is trivial.
-RUN_CYCLES=8000000
+RUN_CYCLES=16000000
 
 DUMP="$OUT/capture_hires.bin"
 
@@ -144,6 +144,95 @@ else
     check_byte "ttf_print row7 (\$A8E8)" "0xA8E8:1" "48" "$DUMP"
     check_byte "ttf_print row8 (\$A910)" "0xA910:1" "40" "$DUMP"
     check_byte "ttf_print row9 (\$A938)" "0xA938:1" "40" "$DUMP"
+
+    # hb_ellipse_fill test: ellipse centre (60,65) rx=6 ry=3 -- centre row
+    # (y=65) column-byte 10 (x=60-65) falls entirely within the x=54-66
+    # span, giving the canonical all-ink byte 0x7f, at $AA32.
+    check_byte "hb_ellipse_fill (\$AA32)" "0xAA32:1" "7f" "$DUMP"
+
+    # hb_put_chars_center test: "AA" centers to x=114 (col-byte 19,
+    # byte-aligned) at row 70 -- row0 of 'A' is the same verified ROM data
+    # (0x08 -> 0x48), at $AB03.
+    check_byte "hb_put_chars_center (\$AB03)" "0xAB03:1" "48" "$DUMP"
+
+    # hb_rect_pattern test: 8-row stripe tile (top half ink, bottom half
+    # paper) over w=6,h=8 at (0,80) -- rows 80-83 = 0x7f, rows 84-87 = 0x40.
+    check_byte "hb_rect_pattern row0 (\$AC80)" "0xAC80:1" "7f" "$DUMP"
+    check_byte "hb_rect_pattern row1 (\$ACA8)" "0xACA8:1" "7f" "$DUMP"
+    check_byte "hb_rect_pattern row2 (\$ACD0)" "0xACD0:1" "7f" "$DUMP"
+    check_byte "hb_rect_pattern row3 (\$ACF8)" "0xACF8:1" "7f" "$DUMP"
+    check_byte "hb_rect_pattern row4 (\$AD20)" "0xAD20:1" "40" "$DUMP"
+    check_byte "hb_rect_pattern row5 (\$AD48)" "0xAD48:1" "40" "$DUMP"
+    check_byte "hb_rect_pattern row6 (\$AD70)" "0xAD70:1" "40" "$DUMP"
+    check_byte "hb_rect_pattern row7 (\$AD98)" "0xAD98:1" "40" "$DUMP"
+
+    # fixedmath test: oric_sin(64) and oric_cos(0) both hit the table's peak
+    # value (127 = 0x7f) at scratch offset $1000/$1001 ($B000/$B001).
+    check_byte "oric_sin(64) (\$B000)" "0xB000:1" "7f" "$DUMP"
+    check_byte "oric_cos(0) (\$B001)"  "0xB001:1" "7f" "$DUMP"
+
+    # hb_flood_fill containment test, row 95: region A (col-byte 0, x=0-5)
+    # filled by the flood -> 0x7f; wall (col-byte 1, x=6-11) unchanged ink
+    # -> 0x7f; region B (col-byte 2, x=12-17), across the wall -> still
+    # 0x40 (paper), proving the fill did not leak past the wall.
+    check_byte "hb_flood_fill region A (\$AED8)" "0xAED8:1" "7f" "$DUMP"
+    check_byte "hb_flood_fill wall (\$AED9)"     "0xAED9:1" "7f" "$DUMP"
+    check_byte "hb_flood_fill region B (\$AEDA)" "0xAEDA:1" "40" "$DUMP"
+
+    # hb_scroll_up test (sub-canvas rows 130-134): row130 gets row131's
+    # content (0x60) shifted up; row134 (vacated) gets the fill (0x40).
+    check_byte "hb_scroll_up shifted (\$B450)" "0xB450:1" "60" "$DUMP"
+    check_byte "hb_scroll_up vacated (\$B4F0)" "0xB4F0:1" "40" "$DUMP"
+
+    # hb_scroll_down test (sub-canvas rows 140-144): row144 gets row143's
+    # content (0x60) shifted down; row140 (vacated) gets the fill (0x40).
+    check_byte "hb_scroll_down shifted (\$B680)" "0xB680:1" "60" "$DUMP"
+    check_byte "hb_scroll_down vacated (\$B5E0)" "0xB5E0:1" "40" "$DUMP"
+
+    # hb_scroll_left test, row 150: exact 6px (1 column-byte) shift moves
+    # col-byte1 (0x60) into col-byte0, and col-byte2 (precleared paper,
+    # 0x40) into col-byte1.
+    check_byte "hb_scroll_left col0 (\$B770)" "0xB770:1" "60" "$DUMP"
+    check_byte "hb_scroll_left col1 (\$B771)" "0xB771:1" "40" "$DUMP"
+
+    # hb_scroll_right test, row 160: pixel at x=5 (col-byte0) moves to
+    # x=11 (col-byte1); vacated col-byte0 becomes the fill (paper, 0x40).
+    check_byte "hb_scroll_right col0 (\$B900)" "0xB900:1" "40" "$DUMP"
+    check_byte "hb_scroll_right col1 (\$B901)" "0xB901:1" "41" "$DUMP"
+
+    # Sprite test: 6x2 all-ink sprite drawn over a paper background at
+    # (0,170) -- snapshot right after hspr_draw() shows the sprite (0x7f),
+    # taken at scratch $B002/$B003; the final state (after hspr_erase())
+    # at the real screen address $BA90/$BAB8 should be back to paper
+    # (0x40), proving the backed-up background was restored exactly.
+    check_byte "hspr_draw row0 (\$B002)"  "0xB002:1" "7f" "$DUMP"
+    check_byte "hspr_draw row1 (\$B003)"  "0xB003:1" "7f" "$DUMP"
+    check_byte "hspr_erase row0 (\$BA90)" "0xBA90:1" "40" "$DUMP"
+    check_byte "hspr_erase row1 (\$BAB8)" "0xBAB8:1" "40" "$DUMP"
+
+    # hires_row_colors_range test: rows 175/177/179 (stride 2 from 175)
+    # get INK=RED(01)/PAPER=GREEN(12); rows 176/178 keep their 0xAA
+    # sentinel, proving the stride actually skipped them.
+    check_byte "hires_row_colors_range row175 ink (\$BB58)"   "0xBB58:1" "01" "$DUMP"
+    check_byte "hires_row_colors_range row175 paper (\$BB59)" "0xBB59:1" "12" "$DUMP"
+    check_byte "hires_row_colors_range row176 skipped (\$BB80)" "0xBB80:1" "aa" "$DUMP"
+    check_byte "hires_row_colors_range row177 ink (\$BBA8)"   "0xBBA8:1" "01" "$DUMP"
+    check_byte "hires_row_colors_range row177 paper (\$BBA9)" "0xBBA9:1" "12" "$DUMP"
+    check_byte "hires_row_colors_range row178 skipped (\$BBD0)" "0xBBD0:1" "aa" "$DUMP"
+    check_byte "hires_row_colors_range row179 ink (\$BBF8)"   "0xBBF8:1" "01" "$DUMP"
+    check_byte "hires_row_colors_range row179 paper (\$BBF9)" "0xBBF9:1" "12" "$DUMP"
+
+    # hires_dissolve_* test: seed=12345's first in-range LFSR output decodes
+    # to y=183,x=140 (col-byte 23) -- dissolve_step(true) should set it to
+    # 0x48 (bit6 | mask 0x08 for x%6==2), at $BCAF.
+    check_byte "hires_dissolve_step (\$BCAF)" "0xBCAF:1" "48" "$DUMP"
+
+    # rasterirq test: marker byte at $B004 (HIRESVRAM+0x1004) should be
+    # 0x99, proving hrirq_start() actually enabled interrupts, Timer 1's
+    # already free-running 100Hz IRQ fired the installed handler at least
+    # once during the busy-wait, and the handler correctly dispatched the
+    # registered __interrupt callback.
+    check_byte "hrirq callback fired (\$B004)" "0xB004:1" "99" "$DUMP"
 fi
 
 echo ""

@@ -83,6 +83,15 @@ repeated addition, mirroring `charwin_init()`'s "avoid a 6502
 multiply/divide" approach. **Call once before any other `hires_*`/`hb_*`
 function.**
 
+This table-based approach (division-by-6 and modulo-by-6 replaced by
+lookup tables, row addresses precomputed rather than multiplied at draw
+time) isn't just this project's own preference — it's independently
+confirmed as *the* standard Oric optimisation technique by OSDK's
+["Efficient rasterization"](https://osdk.org/index.php?page=articles&ref=ART19)
+article, which measures the ROM's naive `CURSET` pixel-plot routine at
+4662 cycles/pixel vs. 85 cycles/pixel (54× faster) using this exact
+Div6/Mod6/Scanlines-table scheme.
+
 ```c
 void hb_init(HiresBitmap *hb, uint8_t *data, uint8_t rows);
 ```
@@ -96,6 +105,42 @@ Fill an entire canvas with a raw byte value (e.g. `0x40` for all-paper).
 **Real Oric RAM is NOT zero-initialized at power-on** — a fresh
 `HiresBitmap`'s contents are garbage, not blank. Always fill before
 drawing.
+
+## Canvas scroll
+
+```c
+void hb_scroll_up(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+void hb_scroll_down(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+void hb_scroll_left(const HiresBitmap *hb, uint8_t amount, bool fill_set);
+void hb_scroll_right(const HiresBitmap *hb, uint8_t amount, bool fill_set);
+```
+
+**Vertical** (`up`/`down`): a straight `memmove` of whole 40-byte rows —
+correct regardless of overlap direction, since HIRES is simple linear
+raster (no C64-style cell interleaving to worry about) — then the vacated
+rows are `memset` to `fill_value`. **Horizontal** (`left`/`right`):
+per-row, the row is snapshotted into a local pixel buffer via `hb_get`
+(avoiding any in-place overlap entirely), shifted, the vacated edge filled,
+then written back via `hb_put` — correctness-first, same approach as
+`hb_bitblit`/`hb_put_chars`.
+
+**These process every row of the `HiresBitmap` passed in** (`hb->rows`),
+unlike the rect/fill primitives below (already scoped to their own `w`/
+`h`) — scrolling only the live 200-row screen costs 200×240 pixel ops for
+a horizontal scroll. Use a small sub-canvas (`hb_init()` with a narrower
+`rows` count, pointed at a sub-range of the buffer) when you only need to
+scroll part of the screen; this is also how `test_hires.sh` keeps its own
+scroll-left/right tests fast under Phosphoric.
+
+**`hb_bitblit` is NOT safe for overlapping same-canvas source/destination
+regions** (no reverse-iteration handling like `gfx/bitmap.c`'s `BlitOp`) —
+don't try to `hb_bitblit` a canvas onto itself to scroll it; use these
+dedicated functions instead. A hand-unrolled absolute-addressing version
+of vertical scroll is a known ~2× speedup on real Oric hardware (per OSDK
+["Optimizing Buggy Boy (2)"](https://osdk.org/index.php?page=articles&ref=ART13),
+which measures 9 cycles/byte for `lda $a000+40*1,x` / `sta $a000+40*0,x`
+vs. 18 cycles/byte for indirect-indexed addressing) — not built here;
+`memmove` is the correct-first default.
 
 ## Pixel primitives
 
@@ -210,14 +255,17 @@ See [ttf.md](ttf.md) for proportional text rendering, and
 tools/requirements.txt`) for converting a source image into an AIC-encoded
 HIRES image using this same `[parity][ink/paper]` model.
 
-## Rect / circle / triangle / polygon fill
+## Rect / ellipse / circle / triangle / polygon / pattern fill, flood fill
 
 ```c
 void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool set);
+void hb_rect_pattern(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t pattern[8]);
+void hb_ellipse_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t rx, uint8_t ry, bool set);
 void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t r, bool set);
 void hb_polygon_fill(const HiresBitmap *hb, const HiresClip *clip, const uint8_t *xs, const uint8_t *ys, uint8_t num, bool set);
 void hb_triangle_fill(const HiresBitmap *hb, const HiresClip *clip,
                        uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, bool set);
+void hb_flood_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, bool set);
 ```
 
 All built on `hb_get`/`hb_put` (simple per-pixel loops), not hand-optimized
@@ -225,15 +273,34 @@ byte-level bit-shifting like `gfx/bitmap.c`'s heavily tuned 6502 routines —
 correctness first; a future pass could special-case byte-aligned/whole-byte
 spans for speed if a demo effect turns out to need it.
 
-`hb_circle_fill` grows a horizontal half-width per scanline until it would
-exceed the radius (`O(r)` per row) rather than a Bresenham-style
-incremental circle — simple and robust at this resolution.
+`hb_rect_pattern` repeats an 8×8 pixel tile (`pattern[8]`, one byte per
+tile row, bit7=leftmost *of the tile*, independent of Oric's 6px HIRES byte
+packing) across the rect — a monochrome hatch/texture fill, not colour
+dithering (Oric has no true per-pixel colour to dither into, unlike
+`gfx/mcbitmap.h`'s `MixedColors`).
+
+`hb_ellipse_fill` grows a horizontal half-width per scanline until it
+would exceed `(dx·ry)² + (dy·rx)² ≤ (rx·ry)²` (`O(rx)` per row) rather than
+a Bresenham-style incremental ellipse — simple and robust at this
+resolution. `hb_circle_fill` is a thin wrapper (`rx=ry=r`).
 
 `hb_polygon_fill` uses an even-odd (ray-casting) point-in-polygon test over
 the vertices' bounding box — handles convex **and** simple concave
 polygons with one algorithm, unlike `gfx/bitmap.c`'s separate
 convex-only/non-convex routines. `hb_triangle_fill` is a thin convenience
 wrapper over it.
+
+`hb_flood_fill` (paint bucket) is a non-recursive scanline-stack algorithm
+adapted from OSDK's
+["Flood Fill"](https://osdk.org/index.php?page=articles&ref=ART18) article:
+fill a contiguous horizontal span in one pass, then queue at most **one**
+seed per contiguous matching run on the rows immediately above/below (not
+one seed per pixel) — this is what keeps the internal seed stack
+(`HB_FLOOD_STACK_SIZE`, 128 entries) shallow in practice, deliberately
+avoiding the 6502's 256-byte hardware stack via recursion (matching this
+codebase's existing "large arrays must be `static`" discipline, e.g.
+`charwin.h`'s `OricViewport`). If the stack fills up, the flood simply
+stops spreading past that point — a partial result, not a crash.
 
 ## Bitblit
 
@@ -257,10 +324,19 @@ only** (bits 0-5), not bit7 (invert) — a destination byte's existing
 invert state is left as-is; use `hires_invert_byte()` separately if the
 copied region needs it.
 
+**Not safe for overlapping same-canvas source/destination regions** — no
+reverse-iteration handling like `gfx/bitmap.c`'s `BlitOp`/`reverse` flag.
+Don't `hb_bitblit` a canvas onto itself (e.g. to scroll it); see "Canvas
+scroll" above for dedicated, overlap-safe functions instead. Used for
+"save-under" sprites in [sprite.md](sprite.md).
+
 ## Text (ROM charset)
 
 ```c
 int hb_put_chars(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, const char *str, uint8_t len);
+int hb_put_chars_left(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len);
+int hb_put_chars_center(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len);
+int hb_put_chars_right(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len);
 ```
 
 Renders using the Oric ROM's standard 6×8 charset (`CHARSETROM`, see
@@ -270,3 +346,21 @@ pixel bytes expect (bit5 = leftmost), so no reformatting is needed —
 `hb_put_chars` just walks each glyph row's bits through `hb_put`. Returns
 the pixel width consumed (`drawn_chars * 6`). Fixed-width only; for a
 proportional font, see [ttf.md](ttf.md).
+
+`hb_put_chars_left/center/right` mirror `ttf_print_left/center/right`
+([ttf.md](ttf.md)), using `hb_put_chars`'s fixed `len*6` pixel width
+instead of `ttf_strlen()` since the ROM charset isn't proportional.
+
+### Advanced: up to 4 charsets via mid-frame TEXT/HIRES switching
+
+No new API needed for this — it falls out of what `hires_on()`/
+`hires_off()`/`hires_footer_enable()` already do. Per OSDK's
+["Charsets"](https://osdk.org/index.php?page=articles&ref=ART8) article:
+since TEXT mode's charset banks (`CHARSET_STD`/`CHARSET_ALT`, `$B400`/
+`$B800`) and HIRES mode's (`HIRES_CHARSET_STD`/`ALT`, `$9800`/`$9C00`) are
+at *different* addresses, alternating TEXT/HIRES mode more than once
+within a single displayed frame gives access to up to 4 distinct charset
+banks in that one frame — e.g. a HIRES picture with a TEXT-mode header
+*and* footer strip (each switch costing its own sticky mode-switch byte,
+same mechanism as the footer), each able to use different charset content
+than the main HIRES area's own footer.

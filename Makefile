@@ -124,6 +124,14 @@ MAIN_HIRES_SRCS = \
   include/hires.h        \
   include/ttf.c          \
   include/ttf.h          \
+  include/fixedmath.c    \
+  include/fixedmath.h    \
+  include/sprite.c       \
+  include/sprite.h       \
+  include/dissolve.c     \
+  include/dissolve.h     \
+  include/rasterirq.c    \
+  include/rasterirq.h    \
   tests/fixtures/ttf_test_font.h
 
 # -------------------------------------------------------------------------

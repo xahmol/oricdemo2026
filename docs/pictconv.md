@@ -9,10 +9,36 @@ with `oric_ttfconv.py`).
 [`pictconv`](https://github.com/Oric-Software-Development-Kit/osdk/tree/master/osdk/main/pictconv)
 tool — same byte format and the same per-scanline colour-attribute
 optimisation idea (`colored` mode, below) — but is a fresh Python
-implementation, not a port of that tool's C++ structure. Only the modes
-relevant to a HIRES bitmap are implemented: `mono`, `colored`, `aic` — not
-pictconv's RGB/RB/twilight-mask/charmap/sam-hocevar/Atari/Limitless
-formats.
+implementation, not a port of that tool's C++ structure.
+
+Implemented so far: `mono`, `colored`, `aic`. Not implemented, with the
+actual reason for each (checked against pictconv's source, not assumed):
+
+- **`-f5`/`-f5z` charmap**: genuinely out of scope — it converts to a
+  *character set + text-screen* representation (TEXT mode), not a HIRES
+  bitmap at all.
+- **`-f3` twilight mask**: repurposes bits 6/7 for a bespoke sprite-
+  transparency-mask scheme specific to one external engine ("TwilightE"),
+  incompatible with the standard bit6="pixel data"/bit7="invert" convention
+  this project's HIRES bytes use everywhere else (`include/hires.h`) —
+  output from this mode isn't a displayable HIRES bitmap under that
+  convention at all, so there's nothing for `hb_*`/`hires.c` to consume.
+- **`-f2` RGB and `-f4` RB (scanline colour-channel decomposition)**,
+  **`-f6` Sam Hocevar dithering**: genuinely valid, general-purpose Oric
+  HIRES techniques, same as `mono`/`colored`/`aic` — **not implemented yet
+  for scope/time reasons, not because they're irrelevant** (an earlier,
+  inaccurate version of this note bundled them in with pictconv's
+  Atari ST/Limitless *machine* formats, which really are irrelevant here;
+  that was wrong). RGB/RB write a raw INK attribute (`R`/`G`/`B` cycling
+  every 3 rows for RGB, `R`/`GB` every 2 rows for RB) at the start of each
+  scanline, then encode per-pixel brightness as ink-on/paper-off for that
+  row's single colour channel — relying on real composite/RGB CRT scanline
+  bleed to perceptually blend adjacent channel-rows into a fuller colour
+  image (conceptually similar to `aic`'s 2-line ink/paper alternation, but
+  3-channel and reliant on analogue blending that Oricutron/Phosphoric
+  don't reproduce, so it won't look right on an emulator screenshot). Sam
+  Hocevar's method is an alternative dithering algorithm for the monochrome
+  case. Flag if you'd like these added.
 
 ## CLI
 

@@ -63,6 +63,19 @@ void hb_init(HiresBitmap *hb, uint8_t *data, uint8_t rows);
 void hb_fill(const HiresBitmap *hb, uint8_t value);
 
 // -------------------------------------------------------------------------
+// Canvas scroll. Vertical shifts whole rows (memmove -- correct regardless
+// of overlap); vacated rows/columns are filled with fill_value/fill_set.
+// NOTE: unlike these, hb_bitblit is NOT safe for overlapping same-canvas
+// source/destination regions -- use these dedicated functions to scroll a
+// canvas in place, don't try to hb_bitblit a canvas onto itself.
+// -------------------------------------------------------------------------
+
+void hb_scroll_up(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+void hb_scroll_down(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+void hb_scroll_left(const HiresBitmap *hb, uint8_t amount, bool fill_set);
+void hb_scroll_right(const HiresBitmap *hb, uint8_t amount, bool fill_set);
+
+// -------------------------------------------------------------------------
 // Pixel primitives
 //
 // Every pixel-writing primitive unconditionally sets bit6 on the resulting
@@ -162,7 +175,15 @@ void hires_aic_apply_range(const HiresAIC *aic, uint8_t y0, uint8_t y1);
 
 void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool set);
 
-// Filled circle, centre (cx,cy), radius r.
+// Monochrome pattern fill: repeats an 8x8 pixel tile (pattern[8], one byte
+// per tile row, bit7=leftmost) across a w x h rect. Hatching/texture fill,
+// not colour dithering -- Oric has no true per-pixel colour to dither into.
+void hb_rect_pattern(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t pattern[8]);
+
+// Filled ellipse, centre (cx,cy), radii (rx,ry).
+void hb_ellipse_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t rx, uint8_t ry, bool set);
+
+// Filled circle, centre (cx,cy), radius r -- thin wrapper over hb_ellipse_fill.
 void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t r, bool set);
 
 // Filled polygon (even-odd rule -- handles convex and simple concave
@@ -172,6 +193,12 @@ void hb_polygon_fill(const HiresBitmap *hb, const HiresClip *clip, const uint8_t
 // Filled triangle -- convenience wrapper over hb_polygon_fill.
 void hb_triangle_fill(const HiresBitmap *hb, const HiresClip *clip,
                        uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, bool set);
+
+// Flood fill (paint bucket), non-recursive scanline-stack algorithm (see
+// hires.c). If the fixed-size internal seed stack fills up, the flood
+// simply stops spreading past that point rather than crashing or
+// overflowing -- a degraded (partial) result, not a memory-safety issue.
+void hb_flood_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, bool set);
 
 // -------------------------------------------------------------------------
 // Bitblit -- no pattern-fill variant (unlike gfx/bitmap.c's BlitOp): Oric
@@ -194,6 +221,12 @@ void hb_bitblit(const HiresBitmap *dst, const HiresClip *clip, uint8_t dx, uint8
 // -------------------------------------------------------------------------
 
 int hb_put_chars(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, const char *str, uint8_t len);
+
+// Alignment helpers, mirroring ttf_print_left/center/right -- using
+// hb_put_chars's fixed 6px/glyph width (len*6), not ttf_strlen().
+int hb_put_chars_left(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len);
+int hb_put_chars_center(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len);
+int hb_put_chars_right(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len);
 
 #pragma compile("hires.c")
 

@@ -62,6 +62,82 @@ void hb_fill(const HiresBitmap *hb, uint8_t value)
 }
 
 // -------------------------------------------------------------------------
+// Canvas scroll
+//
+// Vertical: a straight memmove of whole 40-byte rows (HIRES is simple
+// linear raster, so this is correct regardless of overlap direction --
+// memmove handles that itself), then the vacated rows are memset to
+// fill_value. Horizontal: per-row, snapshot the row into a static pixel
+// buffer via hb_get (avoids any in-place overlap entirely), shift, fill
+// the vacated edge, write back via hb_put. Deliberately NOT built on
+// hb_bitblit: that function has no reverse-iteration/overlap handling for
+// same-canvas self-blits (unlike gfx/bitmap.c's BlitOp), so these scroll
+// functions have their own dedicated, independently-safe logic instead of
+// reusing it. A hand-unrolled absolute-addressing version is a known ~2x
+// speedup for vertical scrolling on real hardware (see docs/hires.md's
+// citation of OSDK ART13's Buggy Boy scroll optimisation) if a demo effect
+// ever needs it -- not built here, memmove is the correct-first default.
+// -------------------------------------------------------------------------
+
+void hb_scroll_up(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value)
+{
+    if (amount >= hb->rows)
+    {
+        hb_fill(hb, fill_value);
+        return;
+    }
+    uint16_t move_bytes = (uint16_t)(hb->rows - amount) * HIRES_ROW_BYTES;
+    uint16_t fill_bytes = (uint16_t)amount * HIRES_ROW_BYTES;
+    memmove(hb->data, hb->data + (uint16_t)amount * HIRES_ROW_BYTES, move_bytes);
+    memset(hb->data + move_bytes, fill_value, fill_bytes);
+}
+
+void hb_scroll_down(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value)
+{
+    if (amount >= hb->rows)
+    {
+        hb_fill(hb, fill_value);
+        return;
+    }
+    uint16_t move_bytes = (uint16_t)(hb->rows - amount) * HIRES_ROW_BYTES;
+    uint16_t fill_bytes = (uint16_t)amount * HIRES_ROW_BYTES;
+    memmove(hb->data + fill_bytes, hb->data, move_bytes);
+    memset(hb->data, fill_value, fill_bytes);
+}
+
+static bool _hb_scroll_row_buf[HIRES_WIDTH_PX];
+
+void hb_scroll_left(const HiresBitmap *hb, uint8_t amount, bool fill_set)
+{
+    for (uint8_t y = 0; y < hb->rows; y++)
+    {
+        for (uint16_t x = 0; x < HIRES_WIDTH_PX; x++)
+            _hb_scroll_row_buf[x] = hb_get(hb, (uint8_t)x, y);
+
+        for (uint16_t x = 0; x < HIRES_WIDTH_PX; x++)
+        {
+            uint16_t src = x + amount;
+            hb_put(hb, (uint8_t)x, y, (src < HIRES_WIDTH_PX) ? _hb_scroll_row_buf[src] : fill_set);
+        }
+    }
+}
+
+void hb_scroll_right(const HiresBitmap *hb, uint8_t amount, bool fill_set)
+{
+    for (uint8_t y = 0; y < hb->rows; y++)
+    {
+        for (uint16_t x = 0; x < HIRES_WIDTH_PX; x++)
+            _hb_scroll_row_buf[x] = hb_get(hb, (uint8_t)x, y);
+
+        for (uint16_t x = 0; x < HIRES_WIDTH_PX; x++)
+        {
+            int16_t src = (int16_t)x - amount;
+            hb_put(hb, (uint8_t)x, y, (src >= 0) ? _hb_scroll_row_buf[src] : fill_set);
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
 // Pixel primitives
 //
 // Every pixel-writing primitive unconditionally ORs in bit6 (0x40) on the
@@ -315,15 +391,45 @@ void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8
     }
 }
 
-// Filled circle: for each scanline within the circle's vertical extent,
-// grow the half-width until it would exceed the radius, then fill that
-// horizontal span. O(r) per row -- simple and robust at HIRES's small
-// (240x200) resolution; no need for a Bresenham-style incremental circle.
-void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t r, bool set)
+// Monochrome pattern fill: repeats an 8x8 pixel tile across a w x h rect.
+// 'pattern' is defined in abstract 8x8 pixel space (bit7=leftmost of the
+// tile) independent of Oric's 6px-per-byte packing -- hb_put handles the
+// storage transparently, same as every other fill primitive. Not a
+// per-pixel colour dither like gfx/mcbitmap.h's MixedColors (Oric has no
+// true per-pixel colour to dither into, see hires.h) -- this is a
+// monochrome hatch/texture fill.
+void hb_rect_pattern(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t pattern[8])
 {
-    int16_t r2 = (int16_t)r * (int16_t)r;
+    for (uint8_t row = 0; row < h; row++)
+    {
+        uint8_t py = (uint8_t)(y + row);
+        if (clip && (py < clip->top || py > clip->bottom))
+            continue;
+        uint8_t prow = pattern[row & 7];
+        for (uint8_t col = 0; col < w; col++)
+        {
+            uint8_t px = (uint8_t)(x + col);
+            if (!clip || (px >= clip->left && px <= clip->right))
+                hb_put(hb, px, py, (prow & (0x80 >> (col & 7))) != 0);
+        }
+    }
+}
 
-    for (int16_t dy = -(int16_t)r; dy <= (int16_t)r; dy++)
+// Filled ellipse: for each scanline within the ellipse's vertical extent,
+// grow the half-width until it would exceed the boundary
+// (dx*ry)^2 + (dy*rx)^2 <= (rx*ry)^2, then fill that horizontal span. O(rx)
+// per row -- simple and robust at HIRES's small (240x200) resolution; no
+// need for a Bresenham-style incremental ellipse. 'long' (32-bit signed) is
+// enough here without special-casing overflow: rx/ry are practically
+// bounded well under ~215 by the 240x200 screen itself, and (rx*ry)^2 only
+// overflows a 32-bit signed intermediate above rx*ry~46340 -- unreachable
+// on this screen.
+void hb_ellipse_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t rx, uint8_t ry, bool set)
+{
+    long rxry2 = (long)rx * ry;
+    rxry2 *= rxry2;
+
+    for (int16_t dy = -(int16_t)ry; dy <= (int16_t)ry; dy++)
     {
         int16_t py16 = (int16_t)cy + dy;
         if (py16 < 0 || py16 >= HIRES_ROWS)
@@ -332,9 +438,17 @@ void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, ui
         if (clip && (py < clip->top || py > clip->bottom))
             continue;
 
+        long dyrx = (long)dy * rx;
+        long dyrx2 = dyrx * dyrx;
+
         int16_t dx = 0;
-        while ((dx + 1) * (dx + 1) + dy * dy <= r2)
+        for (;;)
+        {
+            long dxry = (long)(dx + 1) * ry;
+            if (dxry * dxry + dyrx2 > rxry2)
+                break;
             dx++;
+        }
 
         for (int16_t x = -dx; x <= dx; x++)
         {
@@ -346,6 +460,12 @@ void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, ui
                 hb_put(hb, px, py, set);
         }
     }
+}
+
+// Filled circle -- thin wrapper over hb_ellipse_fill with equal radii.
+void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t r, bool set)
+{
+    hb_ellipse_fill(hb, clip, cx, cy, r, r, set);
 }
 
 // Even-odd (ray-casting) point-in-polygon test over a bounding box --
@@ -401,6 +521,100 @@ void hb_triangle_fill(const HiresBitmap *hb, const HiresClip *clip,
     uint8_t xs[3] = { x0, x1, x2 };
     uint8_t ys[3] = { y0, y1, y2 };
     hb_polygon_fill(hb, clip, xs, ys, 3, set);
+}
+
+// -------------------------------------------------------------------------
+// Flood fill (paint bucket) -- non-recursive scanline-stack algorithm,
+// adapted from the OSDK's "Flood Fill" article (osdk.org, ART18): fill a
+// contiguous horizontal span in one pass, then queue at most ONE seed per
+// contiguous matching run on the rows immediately above/below (not one
+// seed per pixel) -- this is what keeps the seed stack shallow in
+// practice, deliberately avoiding the 6502's 256-byte hardware stack via
+// recursion (same "large arrays must be static" discipline already used
+// elsewhere in this codebase, e.g. charwin.h's OricViewport).
+// -------------------------------------------------------------------------
+
+#define HB_FLOOD_STACK_SIZE 128
+
+typedef struct { uint8_t x, y; } _HbFloodSeed;
+static _HbFloodSeed _hb_flood_stack[HB_FLOOD_STACK_SIZE];
+static uint8_t _hb_flood_sp;
+
+// Returns false if the stack is full: the fill then simply stops spreading
+// past that point (a partially-filled result, not a crash or overflow) --
+// ART18's own reference images needed only single/low-double-digit stack
+// depth, so 128 entries is generous headroom, not a hard requirement.
+static bool _hb_flood_push(uint8_t x, uint8_t y)
+{
+    if (_hb_flood_sp >= HB_FLOOD_STACK_SIZE)
+        return false;
+    _hb_flood_stack[_hb_flood_sp].x = x;
+    _hb_flood_stack[_hb_flood_sp].y = y;
+    _hb_flood_sp++;
+    return true;
+}
+
+// Scan [lx,rx] on 'row', pushing one seed per contiguous run of pixels
+// still matching 'old' -- the key optimisation that keeps the stack from
+// growing one entry per pixel.
+static void _hb_flood_queue_row(const HiresBitmap *hb, uint8_t lx, uint8_t rx, uint8_t row, bool old)
+{
+    bool in_run = false;
+    for (uint8_t x = lx; x <= rx; x++)
+    {
+        if (hb_get(hb, x, row) == old)
+        {
+            if (!in_run)
+            {
+                _hb_flood_push(x, row);
+                in_run = true;
+            }
+        }
+        else
+        {
+            in_run = false;
+        }
+    }
+}
+
+void hb_flood_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, bool set)
+{
+    bool old = hb_get(hb, x, y);
+    if (old == set)
+        return;   // already the target state -- nothing to do
+
+    uint8_t left_bound   = clip ? clip->left   : 0;
+    uint8_t right_bound  = clip ? clip->right  : (uint8_t)(HIRES_WIDTH_PX - 1);
+    uint8_t top_bound    = clip ? clip->top    : 0;
+    uint8_t bottom_bound = clip ? clip->bottom : (uint8_t)(hb->rows - 1);
+
+    _hb_flood_sp = 0;
+    _hb_flood_push(x, y);
+
+    while (_hb_flood_sp > 0)
+    {
+        _hb_flood_sp--;
+        uint8_t px = _hb_flood_stack[_hb_flood_sp].x;
+        uint8_t py = _hb_flood_stack[_hb_flood_sp].y;
+
+        if (hb_get(hb, px, py) != old)
+            continue;   // already filled by an earlier pop
+
+        uint8_t lx = px;
+        while (lx > left_bound && hb_get(hb, (uint8_t)(lx - 1), py) == old)
+            lx--;
+        uint8_t rx = px;
+        while (rx < right_bound && hb_get(hb, (uint8_t)(rx + 1), py) == old)
+            rx++;
+
+        for (uint8_t fx = lx; fx <= rx; fx++)
+            hb_put(hb, fx, py, set);
+
+        if (py > top_bound)
+            _hb_flood_queue_row(hb, lx, rx, (uint8_t)(py - 1), old);
+        if (py < bottom_bound)
+            _hb_flood_queue_row(hb, lx, rx, (uint8_t)(py + 1), old);
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -475,4 +689,26 @@ int hb_put_chars(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_
         drawn++;
     }
     return drawn * 6;
+}
+
+// Alignment helpers, mirroring ttf_print_left/center/right -- but using
+// hb_put_chars's fixed 6px/glyph width (len*6) instead of ttf_strlen(),
+// since the ROM charset is fixed-width, not proportional.
+int hb_put_chars_left(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len)
+{
+    return hb_put_chars(hb, clip, 0, y, str, len);
+}
+
+int hb_put_chars_center(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len)
+{
+    uint16_t w = (uint16_t)len * 6;
+    uint8_t x = (w >= HIRES_WIDTH_PX) ? 0 : (uint8_t)((HIRES_WIDTH_PX - w) / 2);
+    return hb_put_chars(hb, clip, x, y, str, len);
+}
+
+int hb_put_chars_right(const HiresBitmap *hb, const HiresClip *clip, uint8_t y, const char *str, uint8_t len)
+{
+    uint16_t w = (uint16_t)len * 6;
+    uint8_t x = (w >= HIRES_WIDTH_PX) ? 0 : (uint8_t)(HIRES_WIDTH_PX - w);
+    return hb_put_chars(hb, clip, x, y, str, len);
 }
