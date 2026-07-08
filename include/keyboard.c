@@ -167,6 +167,14 @@ static __zeropage uint8_t _kbz1;   // current row index
  */
 void keyb_scan(void)
 {
+    // PHP/PLP (not SEI/CLI) brackets this whole routine's VIA/AY access --
+    // matches include/ijk.c's identical convention, for the same reason:
+    // include/ay.h's ay_write() (used by an IRQ-driven PT3 player, see
+    // include/pt3.h) touches the same VIA Port A/PCR registers and must
+    // not be allowed to interleave with a scan already in progress.
+    __asm { php }
+    __asm { sei }
+
     // Oscar64 inline asm decimal bug: values 10-15 compile to wrong immediates.
     // Use C volatile writes to select AY register $0E (IOA = keyboard columns).
     *((volatile uint8_t *)0x030F) = 14;   // VIA Port A: select AY reg $0E
@@ -249,6 +257,8 @@ void keyb_scan(void)
         dex
         bpl     brow
     }
+
+    __asm { plp }
 }
 
 // -------------------------------------------------------------------------

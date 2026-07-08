@@ -45,7 +45,10 @@ make clean
 
 - `src/main.c` — TEXT-mode entry point (default runtime). Currently a build-chain
   smoke test: inits the TEXT-mode libraries below and reports LOCI/IJK detection
-  status on screen.
+  status on screen, plus two PT3 decode-correctness checks (loads
+  `tests/fixtures/music.pt3` for one tick, then `music_effects.pt3` for five
+  ticks exercising portamento/vibrato/envelope-glide, printing the computed
+  AY register values each time — see `docs/pt3.md`'s Verification section).
 - `src/hires_test.c` — HIRES-mode entry point (`oric_crt_hires.c` runtime). Growing
   test fixture for `include/hires.c`/`ttf.c`, exercised by `make test-hires` —
   not demo content, see `tests/scripts/test_hires.sh` for what's asserted.
@@ -88,6 +91,16 @@ make clean
     interrupts (`hrirq_start()`) — everything else in this project runs with
     interrupts permanently disabled. See `docs/rasterirq.md` **before** using
     it, especially the `__interrupt`-callback and VIA-Port-A-hazard notes.
+  - `ay.c/h` — AY-3-8912 register-write helper (correct VIA/PCR protocol;
+    an earlier version of `oric.h`'s own comment described the wrong one).
+    See `docs/ay.md`.
+  - `pt3.c/h` — PT3 (Vortex Tracker) music player, ticking via `rasterirq.h`
+    at 50Hz (reprograms Timer 1's rate — see `docs/rasterirq.md`'s note on
+    this), loading tunes at runtime via `loci.c`. Notes, ornaments, samples,
+    volume, noise, envelope, tempo, and all four effects (portamento,
+    glissando, vibrato, envelope-glide) are implemented — the effects use a
+    standard, musically-correct design rather than a bit-exact replica of
+    the reference's own bookkeeping for those four. See `docs/pt3.md`.
 - `tools/mktap.py` — wraps an Oscar64 raw `.bin` in an Oric `.tap` tape header.
 - `tools/oric_pictconv.py` — JPG/PNG -> HIRES bitmap converter (mono/colored/aic
   modes). See `docs/pictconv.md`.
@@ -105,8 +118,13 @@ make clean
     test-pictconv`), pure Python, no emulator.
   - `tests/fixtures/` — files copied into `tests/sandbox/` before each Phosphoric
     test run, plus checked-in test images/expected `.bin`s for
-    `test_pictconv.py` and `tests/fixtures/ttf_test_font.h` (a pre-generated
-    font header so `test_hires.sh` doesn't depend on a system font).
+    `test_pictconv.py`, `tests/fixtures/ttf_test_font.h` (a pre-generated
+    font header so `test_hires.sh` doesn't depend on a system font), and
+    `tests/fixtures/music.pt3`/`music_effects.pt3` (small hand-built
+    synthetic PT3 modules, not real tunes, for `pt3.c`'s decode-correctness
+    tests — see `docs/pt3.md`). Phosphoric needs `--loci-flash tests/sandbox`
+    (not just bare `--loci`) for `pt3_load()`'s `file_load()` to actually
+    find them.
   - `tests/sandbox/`, `tests/out/` — gitignored scratch, regenerated per run.
 - `oscar64manual.md` — Oscar64 compiler reference; `docs/` — per-library API
   reference (`docs/README.md` is the index); consult before re-deriving

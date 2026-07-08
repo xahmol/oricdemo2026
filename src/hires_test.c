@@ -12,6 +12,7 @@
 #include "sprite.h"
 #include "dissolve.h"
 #include "rasterirq.h"
+#include "ay.h"
 
 // hrirq test callback: writes a marker byte so the RAM dump can prove the
 // IRQ handler actually fired and dispatched it. Must be __interrupt (saves
@@ -325,6 +326,15 @@ int main(void)
             *scratch = (uint8_t)i;
     }
     hrirq_stop();
+
+    // ay_write() smoke call: neither the AY-3-8912's internal registers nor
+    // the VIA registers it's driven through ($030F/$030C) are visible in a
+    // Phosphoric RAM dump (--dump-ram-at dumps RAM only, not memory-mapped
+    // I/O -- confirmed empirically, both read back flat 0x00 regardless of
+    // what was written). This call only proves ay_write() compiles, links,
+    // and doesn't crash/hang the program -- not that the AY chip receives
+    // the correct bytes. See docs/ay.md for what real verification needs.
+    ay_write(AY_REG_MIXER, 0x38);
 
     for (;;)
         ;

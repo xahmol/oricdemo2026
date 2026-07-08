@@ -233,6 +233,17 @@ else
     # once during the busy-wait, and the handler correctly dispatched the
     # registered __interrupt callback.
     check_byte "hrirq callback fired (\$B004)" "0xB004:1" "99" "$DUMP"
+
+    # ay_write() is NOT byte-exact-tested here: Phosphoric's --dump-ram-at
+    # dumps RAM only, not memory-mapped I/O -- VIA.pra2/VIA.pcr ($030F/
+    # $030C) both read back as flat 0x00 in the dump regardless of what was
+    # actually written during execution (confirmed empirically: an attempt
+    # to assert on their post-ay_write() values failed with '00' for both,
+    # not the expected written bytes, even though the same addresses are
+    # read/written correctly by real CPU instructions during the run).
+    # ay_write()'s correctness against real hardware is unverified by this
+    # harness; see docs/ay.md for what would be needed (Oricutron register
+    # trace or audible check) to verify it for real.
 fi
 
 echo ""

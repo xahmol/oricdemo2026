@@ -31,10 +31,22 @@ extra calls are silently ignored (check the return value). `cb` **must be
 declared `__interrupt`** — see "Callback safety" below.
 
 `hrirq_start()` enables interrupts (`CLI`) — the installed handler becomes
-active and Timer 1's already-free-running 100Hz IRQ (`TIMER1_100HZ`,
-[oric.md](oric.md)) now triggers it. `hrirq_stop()` disables interrupts
-(`SEI`) again — safe to call even if `hrirq_start()` was never called, and
-restores this project's default IRQ-free state.
+active and Timer 1's IRQ now triggers it. `hrirq_stop()` disables
+interrupts (`SEI`) again — safe to call even if `hrirq_start()` was never
+called, and restores this project's default IRQ-free state.
+
+**Timer 1's rate is whatever it's currently programmed to**, not fixed by
+this module. Out of the box (ROM boot, nothing else touched it) it's a
+free-running 100Hz (`TIMER1_100HZ`, [oric.md](oric.md)). [pt3.md](pt3.md)'s
+`pt3_init()` reprograms it to a true 50Hz (`TIMER1_50HZ`) to match PT3's
+conventional tick rate — since there's only one practical free-running
+timer and one IRQ vector on this hardware, **any `hrirq_add()` callback
+scheduled alongside PT3 playback shares whatever rate PT3 set**, not the
+100Hz this section originally assumed. A raster-split effect's
+`cycle_offset` values need recalibrating if a PT3 player is active in the
+same program (50Hz gives a full frame's cycle budget to spread across
+instead of half a frame, which needs different offsets, not just "more of
+the same").
 
 ## Design: why this is safe, researched not assumed
 

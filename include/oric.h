@@ -37,22 +37,40 @@ typedef volatile struct {
 #define VIA_DDRB_INIT   0xF7
 
 // -------------------------------------------------------------------------
-// AY-3-8912 control sequences (via VIA Port B bits 6-7 = BC1/BDIR)
+// AY-3-8912 control sequences (via VIA PCR $030C = BC1/BDIR, NOT Port B
+// bits 6-7 -- an earlier version of this comment claimed the latter; that
+// was wrong. Confirmed correct by two independent, mutually-agreeing
+// sources: this project's own tested include/keyboard.c, and the
+// 6502Nerd/dflat PT3 player's ROUT routine -- see include/ay.h.)
 //
-// Write sequence for AY register N = value V:
-//   1. VIA.pra2 = N;  VIA.prb |= 0xC0;          (BDIR=1, BC1=1 = latch address)
-//   2. VIA.prb  = (VIA.prb & 0x3F) | 0x80;      (BDIR=1, BC1=0 = write data)
-//      VIA.pra2 = V;
-//   3. VIA.prb &= 0x3F;                           (BDIR=0, BC1=0 = inactive)
+// Write sequence for AY register N = value V (VIA_ORA = VIA.pra2 = $030F,
+// VIA_PCR = VIA.pcr = $030C):
+//   1. VIA_ORA = N;  VIA_PCR = 0xFF (SND_SELSETADDR);  VIA_PCR = 0xDD (SND_DESELECT);
+//   2. VIA_ORA = V;  VIA_PCR = 0xFD (SND_SELWRITE);    VIA_PCR = 0xDD (SND_DESELECT);
 //
-// PCR ($030C) is separately used for CB2 = AY keyboard column drive assertion.
-// PCR bits 7-5: 111=CB2 high (deassert), 110=CB2 low (assert)
+// PCR's bits are CB2 (bits 7-5) / CA2 (bits 3-1) edge/output-mode select;
+// the three values above assert/deassert those lines to sequence the AY's
+// BC1/BDIR bus-control inputs. See include/ay.h's ay_write() for the single
+// implementation of this sequence -- don't hand-roll it elsewhere.
 // -------------------------------------------------------------------------
 
 // AY register numbers
-#define AY_REG_MIXER    7    // Mixer control (enable/disable tone+noise per channel)
-#define AY_REG_IOA      14   // External Port A (keyboard column drive, active-low)
-#define AY_REG_IOB      15   // External Port B (not connected on Oric)
+#define AY_REG_TONE_A_LO    0    // Channel A tone period, low byte
+#define AY_REG_TONE_A_HI    1    // Channel A tone period, high byte (bits 0-3)
+#define AY_REG_TONE_B_LO    2    // Channel B tone period, low byte
+#define AY_REG_TONE_B_HI    3    // Channel B tone period, high byte (bits 0-3)
+#define AY_REG_TONE_C_LO    4    // Channel C tone period, low byte
+#define AY_REG_TONE_C_HI    5    // Channel C tone period, high byte (bits 0-3)
+#define AY_REG_NOISE        6    // Noise period (bits 0-4)
+#define AY_REG_MIXER        7    // Mixer control (enable/disable tone+noise per channel)
+#define AY_REG_VOL_A        8    // Channel A amplitude (bits 0-3) / envelope-enable (bit 4)
+#define AY_REG_VOL_B        9    // Channel B amplitude (bits 0-3) / envelope-enable (bit 4)
+#define AY_REG_VOL_C        10   // Channel C amplitude (bits 0-3) / envelope-enable (bit 4)
+#define AY_REG_ENV_LO       11   // Envelope period, low byte
+#define AY_REG_ENV_HI       12   // Envelope period, high byte
+#define AY_REG_ENV_SHAPE    13   // Envelope shape (writing this restarts the envelope generator)
+#define AY_REG_IOA          14   // External Port A (keyboard column drive, active-low)
+#define AY_REG_IOB          15   // External Port B (not connected on Oric)
 
 // -------------------------------------------------------------------------
 // Screen
@@ -270,5 +288,10 @@ typedef volatile struct {
 // ROM sets Timer 1 in free-run mode for 100 Hz (latch value ≈ 9984)
 // For custom timer: write latch to $0306/$0307, start with write to $0305
 #define TIMER1_100HZ    9984    // Latch value for 100 Hz @ 1 MHz Oric clock
+#define TIMER1_50HZ     19968   // Latch value for 50 Hz @ 1 MHz Oric clock --
+                                 // matches ART11's own measured cycles/frame;
+                                 // see include/pt3.h (PT3 music conventionally
+                                 // ticks at 50Hz, and shares this one timer
+                                 // with any include/rasterirq.h consumer)
 
 #endif  // ORIC_H

@@ -94,7 +94,13 @@ MAIN_SRCS = \
   include/ijk.c         \
   include/ijk.h         \
   include/loci.c        \
-  include/loci.h
+  include/loci.h        \
+  include/rasterirq.c   \
+  include/rasterirq.h   \
+  include/ay.c          \
+  include/ay.h          \
+  include/pt3.c         \
+  include/pt3.h
 
 # -------------------------------------------------------------------------
 # HIRES test fixture -- separate program, built with the alternate
@@ -132,6 +138,8 @@ MAIN_HIRES_SRCS = \
   include/dissolve.h     \
   include/rasterirq.c    \
   include/rasterirq.h    \
+  include/ay.c           \
+  include/ay.h           \
   tests/fixtures/ttf_test_font.h
 
 # -------------------------------------------------------------------------
@@ -268,7 +276,7 @@ sandbox-reset: build/$(MAIN).tap
 test-capture: check-phosphoric sandbox-reset
 	$(MKDIR) tests/out 2>$(NULLDEV) ; true
 	$(PHOS) -r $(ATMOSROM) \
-	    -t tests/sandbox/$(MAIN).tap -f --loci \
+	    -t tests/sandbox/$(MAIN).tap -f --loci-flash tests/sandbox \
 	    --headless -c $(CYCLES) \
 	    $(if $(TYPEKEYS),--type-keys '$(TYPEKEYS)') \
 	    --dump-ram-at $(CYCLES):tests/out/capture.bin \
