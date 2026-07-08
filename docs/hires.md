@@ -142,6 +142,34 @@ which measures 9 cycles/byte for `lda $a000+40*1,x` / `sta $a000+40*0,x`
 vs. 18 cycles/byte for indirect-indexed addressing) — not built here;
 `memmove` is the correct-first default.
 
+### Byte-aligned (fast) horizontal scroll
+
+```c
+void hb_scroll_left_fast(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+void hb_scroll_right_fast(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+```
+
+`hb_scroll_left`/`right`'s per-pixel `hb_get`/`hb_put` cost is too slow to
+scroll a full-width canvas every frame (same order-of-magnitude problem
+`sprite.h`'s `hb_bitblit`-vs-`hxspr_draw` tradeoff solves for sprites — see
+that header). These shift each row's bytes by `amount` whole column-bytes
+(6px granularity) via `memmove`, filling the vacated edge with the raw
+`fill_value` byte — the same "byte-aligned = fast" approach, applied to
+scrolling instead of sprite drawing. Used by `src/section_clouds.c`'s
+parallax cloud layer.
+
+**Caveat inherited from how this project uses column-bytes 0-1**: if your
+canvas's rows have their own ink/paper attribute bytes at column-bytes 0-1
+(see `hires_row_colors()` and `src/section_background.c`'s own comment),
+these functions are NOT safe to call across the FULL row width — they
+shift column-bytes 0-1 too, so pixel content will eventually drift into
+them over repeated scrolls, silently and permanently converting that row's
+colour attribute into stray pixel data. `src/section_clouds.c` doesn't use
+these directly for exactly this reason — it has its own
+`clouds_scroll_left()` that explicitly skips column-bytes 0-1. Only use
+`hb_scroll_left_fast`/`right_fast` as-is on a canvas that doesn't reserve
+any columns for attribute bytes.
+
 ## Pixel primitives
 
 ```c

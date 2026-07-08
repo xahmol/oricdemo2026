@@ -12,10 +12,15 @@
 
 #include "hires.h"
 
-// Runs the bird walk-cycle animation on `screen` (pass the live HIRES
-// canvas, e.g. from hb_init(&screen, (uint8_t *)HIRESVRAM, HIRES_ROWS)).
-// Loops forever -- this is currently the demo's only section.
-void section_bird_run(const HiresBitmap *screen);
+// Draws the bird's first frame at its starting position. Call once before
+// any section_bird_tick() calls.
+void section_bird_init(const HiresBitmap *screen);
+
+// Advances the bird one animation step (erase old position/frame, advance
+// state, draw new position/frame) and busy-waits BIRD_STEP_DELAY ticks --
+// call in a loop, e.g. alongside other sections' own per-frame tick
+// functions (see main.c's master loop).
+void section_bird_tick(const HiresBitmap *screen);
 
 #pragma compile("section_bird.c")
 

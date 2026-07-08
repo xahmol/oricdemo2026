@@ -137,6 +137,32 @@ void hb_scroll_right(const HiresBitmap *hb, uint8_t amount, bool fill_set)
     }
 }
 
+void hb_scroll_left_fast(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value)
+{
+    if (amount >= HIRES_ROW_BYTES)
+        amount = HIRES_ROW_BYTES;
+    uint8_t move_len = (uint8_t)(HIRES_ROW_BYTES - amount);
+    for (uint8_t y = 0; y < hb->rows; y++)
+    {
+        uint8_t *row = hb->data + (uint16_t)y * HIRES_ROW_BYTES;
+        memmove(row, row + amount, move_len);
+        memset(row + move_len, fill_value, amount);
+    }
+}
+
+void hb_scroll_right_fast(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value)
+{
+    if (amount >= HIRES_ROW_BYTES)
+        amount = HIRES_ROW_BYTES;
+    uint8_t move_len = (uint8_t)(HIRES_ROW_BYTES - amount);
+    for (uint8_t y = 0; y < hb->rows; y++)
+    {
+        uint8_t *row = hb->data + (uint16_t)y * HIRES_ROW_BYTES;
+        memmove(row + amount, row, move_len);
+        memset(row, fill_value, amount);
+    }
+}
+
 // -------------------------------------------------------------------------
 // Pixel primitives
 //

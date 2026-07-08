@@ -15,6 +15,7 @@
 #include "rasterirq.h"
 #include "section_background.h"
 #include "section_bird.h"
+#include "section_clouds.h"
 
 // Background music: assets/oxygene4.pt3, from 6502Nerd/dflat's own
 // tunes/ collection (the same MIT-licensed repo this project's PT3 player
@@ -80,7 +81,17 @@ int main(void)
         hrirq_start();
     }
 
-    section_bird_run(&screen);
+    section_clouds_init(&screen);
+    section_bird_init(&screen);
+
+    // Master loop: each section owns its own state and pacing, called in
+    // turn every tick (see section_bird.h/section_clouds.h). PT3 playback
+    // stays fully decoupled from this, ticking via its own raster IRQ.
+    for (;;)
+    {
+        section_clouds_tick(&screen);
+        section_bird_tick(&screen);
+    }
 
     return 0;
 }

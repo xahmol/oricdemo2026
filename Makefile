@@ -87,6 +87,8 @@ MAIN_SRCS = \
   src/main.c            \
   src/section_background.c \
   src/section_background.h \
+  src/section_clouds.c  \
+  src/section_clouds.h  \
   src/section_bird.c    \
   src/section_bird.h    \
   assets/bird.h         \
@@ -261,6 +263,8 @@ FLOPPY_SRCS = \
   src/main.c               \
   src/section_background.c \
   src/section_background.h \
+  src/section_clouds.c     \
+  src/section_clouds.h     \
   src/section_bird.c       \
   src/section_bird.h       \
   assets/bird.h            \

@@ -91,32 +91,34 @@ static void bird_wait(uint16_t ticks)
         *scratch = (uint8_t)i;
 }
 
-void section_bird_run(const HiresBitmap *screen)
+static uint8_t bird_frame = 0;
+static uint8_t bird_col = BIRD_MIN_COL;
+static uint8_t bird_angle = 0;
+static uint8_t bird_y;
+
+void section_bird_init(const HiresBitmap *screen)
 {
-    uint8_t frame = 0;
-    uint8_t col = BIRD_MIN_COL;
-    uint8_t angle = 0;
-    uint8_t y = bird_y_for_angle(angle);
+    bird_y = bird_y_for_angle(bird_angle);
+    hxspr_draw(screen, bird_walk, BIRD_FRAME_W_BYTES, BIRD_FRAME_H, bird_col, bird_y,
+               HXSPR_XOR, (uint8_t *)0, &bird_color);
+}
 
-    hxspr_draw(screen, bird_walk, BIRD_FRAME_W_BYTES, BIRD_FRAME_H, col, y, HXSPR_XOR, (uint8_t *)0, &bird_color);
+void section_bird_tick(const HiresBitmap *screen)
+{
+    bird_wait(BIRD_STEP_DELAY);
 
-    for (;;)
-    {
-        bird_wait(BIRD_STEP_DELAY);
+    hxspr_erase(screen, bird_walk + (uint16_t)bird_frame * BIRD_FRAME_SIZE, BIRD_FRAME_W_BYTES, BIRD_FRAME_H,
+                bird_col, bird_y, HXSPR_XOR, (uint8_t *)0, &bird_color);
 
-        hxspr_erase(screen, bird_walk + (uint16_t)frame * BIRD_FRAME_SIZE, BIRD_FRAME_W_BYTES, BIRD_FRAME_H,
-                    col, y, HXSPR_XOR, (uint8_t *)0, &bird_color);
+    bird_frame++;
+    if (bird_frame >= BIRD_FRAME_COUNT)
+        bird_frame = 0;
+    bird_col++;
+    if (bird_col > BIRD_MAX_COL)
+        bird_col = BIRD_MIN_COL;
+    bird_angle = (uint8_t)(bird_angle + BIRD_ANGLE_STEP);
+    bird_y = bird_y_for_angle(bird_angle);
 
-        frame++;
-        if (frame >= BIRD_FRAME_COUNT)
-            frame = 0;
-        col++;
-        if (col > BIRD_MAX_COL)
-            col = BIRD_MIN_COL;
-        angle = (uint8_t)(angle + BIRD_ANGLE_STEP);
-        y = bird_y_for_angle(angle);
-
-        hxspr_draw(screen, bird_walk + (uint16_t)frame * BIRD_FRAME_SIZE, BIRD_FRAME_W_BYTES, BIRD_FRAME_H,
-                   col, y, HXSPR_XOR, (uint8_t *)0, &bird_color);
-    }
+    hxspr_draw(screen, bird_walk + (uint16_t)bird_frame * BIRD_FRAME_SIZE, BIRD_FRAME_W_BYTES, BIRD_FRAME_H,
+               bird_col, bird_y, HXSPR_XOR, (uint8_t *)0, &bird_color);
 }

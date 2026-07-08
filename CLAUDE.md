@@ -82,16 +82,29 @@ make clean
   distribution targets (`oric_crt_hires.c` for tape, `oric_crt_floppy_hires.c`
   for floppy — same source, `#ifdef STORAGE_FLOPPY` only changes which
   `pt3_load()` overload/music-file-reference is used). A thin sequencer:
-  `hires_init()`/mode-switch/colour baseline/footer, starts PT3 background
-  music (`assets/oxygene4.pt3`) ticking via a 50Hz raster IRQ, then calls
-  each `src/section_*.c` effect module in turn (Oscar64 `#pragma compile`
-  chain, see `src/section_bird.h`). Currently one section.
-- `src/section_bird.c`/`.h` — first demo section: an animated bird flying
-  both horizontally (byte-aligned XOR sprite via `include/sprite.h`,
-  7-frame walk cycle) and vertically (a sine wave via `include/fixedmath.h`'s
-  `oric_sin()`), a nod to the animated bird in the original "Welcome to
-  Oric Atmos" demo (oric.org/software/welcome_to_oric_atmos-593.html).
-  Frame data is `assets/bird.h`.
+  `hires_init()`/mode-switch/background/footer/music setup, then a master
+  loop calling each section's own `_tick()` function every iteration (see
+  `src/section_bird.h`/`src/section_clouds.h`) — sections own their state,
+  `main.c` just drives the shared loop so multiple animated sections (bird,
+  clouds) run concurrently rather than each hogging its own `for(;;)`.
+- `src/section_background.c`/`.h` — draws the static sky+creek background
+  once at startup (plain PAPER colour bands: cyan sky, blue creek — see
+  that file's own header comment for why it's colour-only, no pixel
+  texture, and the known Phosphoric rendering bug that constrains it).
+- `src/section_clouds.c`/`.h` — parallax cloud layer in the sky's upper
+  rows: a `HiresBitmap` sub-canvas scrolled independently of the bird via
+  its own `clouds_scroll_left()` (deliberately NOT `hires.h`'s general
+  `hb_scroll_left_fast` — see that function's own caveat about column-bytes
+  0-1). Ticks on its own cadence (every `CLOUD_SCROLL_EVERY` main-loop
+  ticks), giving a two-speed depth effect against the bird's own per-tick
+  horizontal movement.
+- `src/section_bird.c`/`.h` — animated bird flying both horizontally
+  (byte-aligned XOR sprite via `include/sprite.h`, 7-frame walk cycle) and
+  vertically (a sine wave via `include/fixedmath.h`'s `oric_sin()`), a nod
+  to the animated bird in the original "Welcome to Oric Atmos" demo
+  (oric.org/software/welcome_to_oric_atmos-593.html). Frame data is
+  `assets/bird.h`. Exposes `section_bird_init()`/`section_bird_tick()`
+  (not a `_run()` loop) — see `main.c`'s master loop above.
 - `src/buildtest.c` — TEXT-mode build-chain regression test (default
   `oric_crt.c` runtime; NOT demo content, not built by `all`/`usb`/`zip`).
   Inits the TEXT-mode libraries and reports LOCI/IJK detection status on

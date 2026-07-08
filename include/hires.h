@@ -75,6 +75,18 @@ void hb_scroll_down(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
 void hb_scroll_left(const HiresBitmap *hb, uint8_t amount, bool fill_set);
 void hb_scroll_right(const HiresBitmap *hb, uint8_t amount, bool fill_set);
 
+// Byte-aligned (6px-granularity) horizontal scroll: shifts each row's bytes
+// by `amount` whole column-bytes via memmove, not per-pixel hb_get/hb_put --
+// far cheaper than hb_scroll_left/right for scrolling a full-width canvas
+// every frame (that per-pixel cost is the same order of magnitude as
+// sprite.h's hb_bitblit-vs-hxspr_draw tradeoff -- see that header's own
+// comment). Only ever moves whole bytes, so fine detail can shift by 6px
+// steps only; normal, expected granularity for this hardware. Vacated
+// column-bytes are filled with the raw `fill_value` byte (e.g. 0x40 for
+// blank, or a background tile byte) -- same convention as hb_scroll_up/down.
+void hb_scroll_left_fast(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+void hb_scroll_right_fast(const HiresBitmap *hb, uint8_t amount, uint8_t fill_value);
+
 // -------------------------------------------------------------------------
 // Pixel primitives
 //
