@@ -29,4 +29,5 @@ documents what's actually present in `include/` here.
 14. [AY-3-8912 register-write helper (ay.h)](ay.md)
 15. [PT3 music player (pt3.h)](pt3.md)
 16. [Image conversion (tools/oric_pictconv.py)](pictconv.md)
-17. [Build notes](build-notes.md)
+17. [Floppy-disk build target (tools/oric_floppybuilder.py, floppy.h)](floppy.md)
+18. [Build notes](build-notes.md)

@@ -178,6 +178,10 @@ static __zeropage uint8_t l_track, l_side;
 static __zeropage uint8_t l_dest_lo, l_dest_hi;
 static __zeropage uint8_t l_bytes_lo, l_bytes_hi;   // remaining byte count (16-bit)
 static __zeropage uint8_t l_retry;
+static __zeropage uint8_t l_full_sector;   // nonzero: store all 256 bytes this
+                                            // sector (more sectors follow); zero:
+                                            // this is the final sector -- only
+                                            // store l_bytes_lo bytes, see fetch_byte
 
 // Fixed API cell addresses -- plain integer constants, NOT pointer-
 // dereference expressions (unlike include/floppy.h's own FLOPPY_API_*
@@ -300,6 +304,21 @@ seek_wait:
     bcs seek_wait
     asl
 seek_done:
+    // Is this the FINAL sector of the request (fewer than 256 bytes
+    // actually wanted), or a full one with more sectors still to follow?
+    // l_bytes_hi nonzero means at least one more full sector's worth
+    // remains after this one, so THIS one must be a full 256-byte sector
+    // by construction. l_bytes_hi==0 means l_bytes_lo (1-255, next_sector
+    // already ruled out 0) is the exact count still wanted -- this sector
+    // is the last one, and only that many bytes should actually be stored
+    // (found empirically: this project's own floppy_load() test called
+    // with a 64-byte request wrote a full zero-padded 256-byte sector,
+    // overflowing the caller's own 64-byte buffer by 192 bytes into
+    // whatever memory followed it -- a real, confirmed bug, not a
+    // documented tradeoff, despite an earlier version of this comment
+    // block claiming otherwise).
+    lda l_bytes_hi
+    sta l_full_sector
     ldy #4
     sty l_retry
 retry_sector:
@@ -320,7 +339,18 @@ fetch_byte:
     lda [FDC_DRQ_REGISTER]
     bmi fetch_byte
     lda [FDC_DATA_REGISTER]
+    // Still read every byte the FDC streams out regardless (required to
+    // keep the hardware transfer correctly synced -- a sector read can't
+    // be "aborted" partway through), but only STORE it if this is a full
+    // sector, or (for the final, partial sector) if we haven't yet
+    // reached the actual wanted byte count.
+    ldx l_full_sector
+    bne do_store
+    cpy l_bytes_lo
+    bcs skip_store
+do_store:
     sta (l_dest_lo), y
+skip_store:
     iny
     bne fetch_byte
     lda [FDC_STATUS_REGISTER]
@@ -338,19 +368,17 @@ fetch_byte:
     rts
 
 sector_ok:
-    // Advance destination by one page (256 bytes).
+    // Advance destination by one page (256 bytes) regardless of how many
+    // bytes of THIS sector were actually stored (fetch_byte above already
+    // limited that for the final partial sector) -- l_dest_hi tracks
+    // "next free byte after the highest one this routine might write",
+    // which is always a full page ahead once a sector's read completes,
+    // whether or not every byte of it got stored.
     inc l_dest_hi
     // Advance sector (with track rollover), and decrement the remaining
     // byte count by 256 (a full sector), clamping so a final partial
-    // sector (<256 bytes remaining) still correctly reaches 0 without
-    // wrapping negative -- since we always read a FULL 256-byte sector
-    // regardless of how many bytes are actually wanted, a request whose
-    // size isn't a multiple of 256 gets rounded up to the next sector
-    // boundary. This is documented, deliberate behavior (see
-    // include/floppy.c): callers pass max_size, not exact size, so
-    // rounding up read volume is harmless (extra bytes land past the
-    // caller's own buffer only if max_size undersells the true size,
-    // which is the caller's bug, not this routine's).
+    // sector (<256 bytes remaining) correctly reaches exactly 0 rather
+    // than wrapping negative and looping for more (nonexistent) sectors.
     lda l_bytes_hi
     beq sub_lo_only
     dec l_bytes_hi

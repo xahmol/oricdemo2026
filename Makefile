@@ -327,6 +327,12 @@ run-disk: build/oricdemo_floppy.dsk
 	cd $(ORICUTRON_HOME) && \
 	    $(EMUL) $(EMUFLAG) --disk-rom microdis.rom -d "$(CURDIR)/build/oricdemo_floppy.dsk"
 
+test-disk: check-phosphoric build/oricdemo_floppy.dsk
+	$(MKDIR) tests/out 2>$(NULLDEV) ; true
+	PHOS=$(PHOS) ATMOSROM=$(ATMOSROM) DISKROM=$(DISKROM) \
+	    DSKFILE=build/oricdemo_floppy.dsk OUT=tests/out \
+	    bash tests/scripts/test_disk.sh
+
 # -------------------------------------------------------------------------
 # USB stick transfer -- variable declarations
 # -------------------------------------------------------------------------
@@ -365,6 +371,12 @@ PHOSDIR  ?= NOT_SET
 PHOS      = $(PHOSDIR)/oric1-emu
 ATMOSROM  = $(PHOSDIR)/roms/basic11b.rom
 
+# Microdisc boot EPROM ROM image, needed only by `make test-disk` (see
+# docs/floppy.md) -- Phosphoric's --disk-rom flag. Confirmed present
+# locally under ORICUTRON_HOME; Phosphoric itself does not ship it (it only
+# emulates the Microdisc hardware, not its firmware).
+DISKROM   = $(ORICUTRON_HOME)/roms/microdis.rom
+
 CYCLES   ?= 8000000
 
 # =========================================================================
@@ -372,7 +384,7 @@ CYCLES   ?= 8000000
 # all: must appear first so it is the default goal
 # =========================================================================
 
-.PHONY: all clean run docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv
+.PHONY: all clean run docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
 
 all: build/$(MAIN).tap
 
