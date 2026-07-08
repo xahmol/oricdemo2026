@@ -3,7 +3,11 @@
 #include "pt3.h"
 #include "ay.h"
 #include "oric.h"
+#ifdef STORAGE_FLOPPY
+#include "floppy.h"
+#else
 #include "loci.h"
+#endif
 
 // Standard 12-tone-equal-temperament AY tone-period table (96 notes, C0 =
 // 32.7032Hz), referenced against the ZX Spectrum's ~1.7734MHz AY clock (the
@@ -105,6 +109,19 @@ static uint16_t pt3_word_le(uint16_t offset)
     return (uint16_t)pt3_byte(offset) | ((uint16_t)pt3_byte((uint16_t)(offset + 1)) << 8);
 }
 
+#ifdef STORAGE_FLOPPY
+bool pt3_load(uint8_t file_index)
+{
+    int16_t r;
+    pt3_loaded = false;
+    r = floppy_load(file_index, pt3_module, PT3_MAX_MODULE_SIZE);
+    if (r < 0)
+        return false;
+    pt3_module_len = (uint16_t)r;
+    pt3_loaded = true;
+    return true;
+}
+#else
 bool pt3_load(const char *path)
 {
     int16_t r;
@@ -118,6 +135,7 @@ bool pt3_load(const char *path)
     pt3_loaded = true;
     return true;
 }
+#endif
 
 // Derives channel A/B/C's stream_pos from the patterns-table entry selected
 // by order-list byte `order_byte`. The byte is already pre-scaled by 3 in

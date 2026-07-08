@@ -46,10 +46,28 @@
 #define PT3_MAX_MODULE_SIZE 6144
 #endif
 
-// Loads a PT3 module from LOCI storage into the internal module buffer.
-// Returns false (silent no-op -- no music, not a crash) if LOCI isn't
-// present, the file doesn't exist, or it exceeds PT3_MAX_MODULE_SIZE.
+// Loads a PT3 module into the internal module buffer. Two storage
+// backends, selected at compile time (matching this project's existing
+// -dNOFLOAT-style build-macro convention) -- these are NOT alternative
+// signatures for the same underlying operation, they reflect a genuine
+// difference between the two build targets (see docs/floppy.md):
+//
+// Default (LOCI, runtime path string): loads from LOCI mass storage
+// (include/loci.h). Returns false (silent no-op -- no music, not a crash)
+// if LOCI isn't present, the file doesn't exist, or it exceeds
+// PT3_MAX_MODULE_SIZE.
+//
+// STORAGE_FLOPPY (compile-time file index): loads via
+// include/floppy.h's floppy_load(). There is no runtime directory to
+// search on this target -- only a fixed file table baked into the disk
+// image at build time (see build/floppy_directory.h's LOADER_*_FILE
+// #defines) -- so files are addressed by that compile-time integer index,
+// not a path. Returns false if the file exceeds PT3_MAX_MODULE_SIZE.
+#ifdef STORAGE_FLOPPY
+bool pt3_load(uint8_t file_index);
+#else
 bool pt3_load(const char *path);
+#endif
 
 // Resets playback to the start of the currently loaded module (order
 // position, per-channel state, tempo counter). Call once after a

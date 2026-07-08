@@ -1,0 +1,64 @@
+; disk_script.txt - FloppyBuilder script for the floppy-disk build target
+; (see docs/floppy.md). Driven by -D defines from the Makefile -- run
+; TWICE per build (see docs/floppy.md's two-pass build note): once with
+; `init` (before the loader/demo know their real disk placement) and once
+; with `build` (after both have been recompiled with the real values this
+; `init` run computes). Both runs use this exact same script -- only the
+; file CONTENTS at {LOADER_BIN}/{DEMO_BIN} differ between passes, never
+; their paths, sizes (by design -- see docs/floppy.md), or positions.
+
+FormatVersion 1.0
+DefineDisk 2 80 17
+OutputLayoutFile {LAYOUT_HEADER}
+OutputFloppyFile {DISK_IMAGE}
+SetCompressionMode None
+
+; Track 0, sector 1: Jasmin's own boot-sector slot. This project doesn't
+; implement Jasmin support (Microdisc only for v1, see docs/floppy.md's
+; roadmap note) -- but the Microdisc EPROM's own directory sanity check
+; ALSO validates this sector's header area (it contains a "SEDORIC "
+; filesystem-name signature, not executable code the Microdisc EPROM ever
+; runs), so it can't be left blank even on a Microdisc-only disk. Confirmed
+; empirically: omitting this sector, or filling it with an arbitrary
+; non-zero placeholder instead of the real signature bytes, reproduces
+; "No operating system on disc" / "insert system disc" respectively --
+; only the exact reference header lets boot proceed. See
+; tools/floppy/sector1_header.bin and docs/floppy.md.
+SetPosition 0 1
+WriteSector {SECTOR1_HEADER_BIN}
+
+; Track 0, sector 2: where the Microdisc boot EPROM loads its boot sector
+; from, unconditionally -- see tools/floppy/bootsector_microdisc.c.
+SetPosition 0 2
+WriteSector {BOOTSECTOR_BIN}
+
+; Track 0, sector 3: a fixed, non-executable directory-entry-shaped data
+; blob ("SYSTEM"/"DOS   " filenames, "BOOTUP  COM"), required so the
+; Microdisc EPROM's own directory-sector sanity check passes -- without
+; this exact sector present, the EPROM never reaches our boot sector at
+; all and instead shows a blinking "No operating system on disc" message
+; (confirmed empirically: this was missing in an earlier build of this
+; script and reproduced exactly that failure under Phosphoric). Bytes
+; traced precisely from OSDK's reference sector_3.asm -- see
+; tools/floppy/directory_sanity_sector.bin and docs/floppy.md.
+SetPosition 0 3
+WriteSector {DIRECTORY_SANITY_BIN}
+
+; Track 0, sector 4: must match bootsector_microdisc.c's own
+; LOADER_TRACK/LOADER_SECTOR #defines exactly.
+SetPosition 0 4
+WriteLoader {LOADER_BIN} {LOADER_LOAD_ADDR}
+
+; Track 0, sector 10: the demo binary itself (tools/floppy/loader.c's
+; boot-handoff target, file index 0 -- never loaded via floppy_load()).
+SetPosition 0 10
+AddFile {DEMO_BIN}
+AddDefine LOADER_DEMO_FILE {FileIndex}
+
+; File index 1: src/floppy_test.c's floppy_load() smoke-test payload.
+AddFile {PAYLOAD_BIN}
+AddDefine LOADER_PAYLOAD_FILE {FileIndex}
+
+; File index 2: src/floppy_test.c's pt3_load() smoke test (STORAGE_FLOPPY).
+AddFile {MUSIC_BIN}
+AddDefine LOADER_MUSIC_FILE {FileIndex}

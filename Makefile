@@ -143,6 +143,191 @@ MAIN_HIRES_SRCS = \
   tests/fixtures/ttf_test_font.h
 
 # -------------------------------------------------------------------------
+# Floppy-disk build target (see docs/floppy.md) -- an independent second
+# distribution target alongside the tape/LOCI 'all'/'usb'/'zip' pipeline
+# above (that pipeline is completely unchanged by any of this). Boots via
+# the Microdisc disk controller's own boot EPROM -- no SEDORIC/DOS, no
+# LOCI device, works in plain Oricutron. Not part of 'all'/'usb'/'zip'.
+#
+# FLOPPY_LOADER_ADDRESS is the one genuinely shared constant between
+# tools/floppy/bootsector_microdisc.c, tools/floppy/loader.c, and
+# tools/floppy/disk_script.txt -- passed as a -d/-D define to all three so
+# it can't drift. Boot-sector/loader track/sector POSITIONS (track 0
+# sector 2 for the boot sector, track 0 sector 4 for the loader) are NOT
+# threaded through Makefile variables -- they're literals independently
+# matched between bootsector_microdisc.c's own #defines and
+# disk_script.txt's SetPosition calls (documented in both places as
+# "must match"), the same manual-sync convention already used for those
+# two files' FDC register constants. If you change one, change the other.
+# -------------------------------------------------------------------------
+
+FLOPPY_MAIN            = floppy_test
+FLOPPY_PROGNAME        = FLOPPYDEMO
+FLOPPY_LOADER_ADDRESS  = 0xFA00
+# The demo's ENTRY point must be include/oric_crt_floppy.c's "startup"
+# region ($0500, where oric_startup's SEI/BSS-clear/ZP-clear/stack-setup
+# lives), NOT $0580 (the "main" region, i.e. main() itself) -- jumping
+# straight to $0580 skips all of that init, leaving interrupts enabled and
+# the software stack/BSS/ZP uninitialized. tools/floppy/loader.c defaults
+# DEMO_ADDRESS to $0580 if never told otherwise, so this MUST be passed
+# explicitly to every loader.c compile below (confirmed empirically: the
+# demo hung early, with an interrupt vectoring into uninitialized zero-page
+# garbage at $0245, before this fix).
+FLOPPY_DEMO_ENTRY_ADDRESS = 0x0500
+
+CFLAGS_FLOPPY_RT = \
+  -n              \
+  -tf=bin         \
+  -i=include      \
+  -O1
+
+CFLAGS_FLOPPY_DEMO = \
+  -n              \
+  -tf=bin         \
+  -rt=include/oric_crt_floppy.c \
+  -i=include      \
+  -i=src          \
+  -O2             \
+  -dNOFLOAT       \
+  -dSTORAGE_FLOPPY
+
+FLOPPY_SRCS = \
+  src/floppy_test.c        \
+  include/oric_crt_floppy.c \
+  include/crt_math.c       \
+  include/oric.h           \
+  include/charwin.c        \
+  include/charwin.h        \
+  include/keyboard.c       \
+  include/keyboard.h       \
+  include/floppy.c         \
+  include/floppy.h         \
+  include/rasterirq.c      \
+  include/rasterirq.h      \
+  include/ay.c             \
+  include/ay.h             \
+  include/pt3.c            \
+  include/pt3.h
+
+FLOPPY_LOADER_SRCS = tools/floppy/loader.c
+FLOPPY_BOOTSECTOR_SRCS = tools/floppy/bootsector_microdisc.c
+
+# Test fixtures baked into the disk image (see src/floppy_test.c's own
+# file-index convention comment: 0 = itself, 1 = payload, 2 = music).
+FLOPPY_PAYLOAD_BIN = tests/fixtures/floppy_payload_test.bin
+FLOPPY_MUSIC_BIN   = tests/fixtures/music.pt3
+
+# -------------------------------------------------------------------------
+# Two-pass build (see docs/floppy.md):
+#   1. Compile loader.c with placeholder demo track/sector/size (its
+#      compiled SIZE is stable across both passes -- only immediate-
+#      operand VALUES differ, not instruction count/structure -- so this
+#      placeholder compile's size can be trusted for the disk layout).
+#   2. Compile the demo with a checked-in placeholder floppy_directory.h
+#      (same array shapes, dummy values) to learn its real compiled size.
+#   3. Extract the boot sector (tools/floppy/extract_bootsector.py):
+#      pulls just the "bootsector" label's bytes out of its own compiled
+#      .bin/.map (which Oscar64's default runtime wraps in CRT scaffolding
+#      this sector doesn't need) and prepends the Microdisc EPROM's
+#      required 23-byte header.
+#   4. Run oric_floppybuilder.py `init`: places all files, generates the
+#      REAL build/floppy_directory.h (with the demo's real track/sector/
+#      size -- needed by step 5) and the real (unused at this stage) init
+#      disk image.
+#   5. Recompile loader.c with the REAL demo track/sector/size from step
+#      4's header (same size as step 1's placeholder compile, by design).
+#   6. Recompile the demo with the REAL floppy_directory.h from step 4
+#      (same size as step 2's placeholder compile, by design -- only the
+#      embedded table VALUES differ, not the array shapes).
+#   7. Run oric_floppybuilder.py `build`: same script as step 4, now with
+#      the REAL loader (step 5) and REAL demo (step 6) -- their sizes are
+#      unchanged from what step 4 already computed the layout from, so
+#      the disk's track/sector placements stay valid.
+# -------------------------------------------------------------------------
+
+build/floppy_loader_placeholder.bin: $(FLOPPY_LOADER_SRCS)
+	@$(MKDIR) build 2>$(NULLDEV) ; true
+	$(CC) $(CFLAGS_FLOPPY_RT) -rt=include/crt_math.c \
+	    -dDEMO_TRACK=0 -dDEMO_SECTOR=0 -dDEMO_SIZE=0 \
+	    -dLOADER_ADDRESS=$(FLOPPY_LOADER_ADDRESS) \
+	    -dDEMO_ADDRESS=$(FLOPPY_DEMO_ENTRY_ADDRESS) \
+	    -o=build/floppy_loader_placeholder.bin tools/floppy/loader.c
+
+build/floppy_demo_pass1.bin: $(FLOPPY_SRCS) tests/fixtures/floppy_directory_placeholder.h
+	@$(MKDIR) build 2>$(NULLDEV) ; true
+	cp tests/fixtures/floppy_directory_placeholder.h build/floppy_directory.h
+	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
+	    -o=build/floppy_demo_pass1.bin src/floppy_test.c
+
+build/floppy_bootsector_compiled.bin: $(FLOPPY_BOOTSECTOR_SRCS)
+	@$(MKDIR) build 2>$(NULLDEV) ; true
+	$(CC) $(CFLAGS_FLOPPY_RT) -g \
+	    -o=build/floppy_bootsector_compiled.bin tools/floppy/bootsector_microdisc.c
+
+build/floppy_bootsector.bin: build/floppy_bootsector_compiled.bin
+	$(PY) tools/floppy/extract_bootsector.py \
+	    build/floppy_bootsector_compiled.bin \
+	    build/floppy_bootsector_compiled.map \
+	    build/floppy_bootsector.bin
+
+# init pass: computes the real disk layout. Depends on the PLACEHOLDER
+# loader/demo (their sizes, not their real values, are what matter here).
+# NOTE: oric_floppybuilder.py resolves script-relative paths against the
+# SCRIPT's own directory (tools/floppy/), not the caller's cwd -- so every
+# -D path here is made absolute via $(CURDIR) to sidestep that entirely.
+build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script.txt \
+	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
+	    -D DISK_IMAGE=$(CURDIR)/build/floppy_init.dsk \
+	    -D BOOTSECTOR_BIN=$(CURDIR)/build/floppy_bootsector.bin \
+	    -D DIRECTORY_SANITY_BIN=$(CURDIR)/tools/floppy/directory_sanity_sector.bin \
+	    -D SECTOR1_HEADER_BIN=$(CURDIR)/tools/floppy/sector1_header.bin \
+	    -D LOADER_BIN=$(CURDIR)/build/floppy_loader_placeholder.bin \
+	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
+	    -D DEMO_BIN=$(CURDIR)/build/floppy_demo_pass1.bin \
+	    -D PAYLOAD_BIN=$(CURDIR)/$(FLOPPY_PAYLOAD_BIN) \
+	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN)
+
+# Real values, parsed out of the generated header by the shell (make has
+# no built-in way to read a C #define -- this is simpler than teaching
+# oric_floppybuilder.py to also emit a Make-include fragment).
+FLOPPY_DEMO_REAL_TRACK  = $(shell grep FloppyFileStartTrack  build/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
+FLOPPY_DEMO_REAL_SECTOR = $(shell grep FloppyFileStartSector build/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
+FLOPPY_DEMO_REAL_SIZE   = $(shell grep FloppyFileSize        build/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
+
+build/floppy_loader.bin: build/floppy_directory.h $(FLOPPY_LOADER_SRCS)
+	$(CC) $(CFLAGS_FLOPPY_RT) -rt=include/crt_math.c \
+	    -dDEMO_TRACK=$(FLOPPY_DEMO_REAL_TRACK) \
+	    -dDEMO_SECTOR=$(FLOPPY_DEMO_REAL_SECTOR) \
+	    -dDEMO_SIZE=$(FLOPPY_DEMO_REAL_SIZE) \
+	    -dLOADER_ADDRESS=$(FLOPPY_LOADER_ADDRESS) \
+	    -dDEMO_ADDRESS=$(FLOPPY_DEMO_ENTRY_ADDRESS) \
+	    -o=build/floppy_loader.bin tools/floppy/loader.c
+
+build/floppy_demo.bin: build/floppy_directory.h $(FLOPPY_SRCS)
+	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
+	    -o=build/floppy_demo.bin src/floppy_test.c
+
+build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script.txt \
+	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
+	    -D DISK_IMAGE=$(CURDIR)/build/oricdemo_floppy.dsk \
+	    -D BOOTSECTOR_BIN=$(CURDIR)/build/floppy_bootsector.bin \
+	    -D DIRECTORY_SANITY_BIN=$(CURDIR)/tools/floppy/directory_sanity_sector.bin \
+	    -D SECTOR1_HEADER_BIN=$(CURDIR)/tools/floppy/sector1_header.bin \
+	    -D LOADER_BIN=$(CURDIR)/build/floppy_loader.bin \
+	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
+	    -D DEMO_BIN=$(CURDIR)/build/floppy_demo.bin \
+	    -D PAYLOAD_BIN=$(CURDIR)/$(FLOPPY_PAYLOAD_BIN) \
+	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN)
+
+disk: build/oricdemo_floppy.dsk
+
+run-disk: build/oricdemo_floppy.dsk
+	cd $(ORICUTRON_HOME) && \
+	    $(EMUL) $(EMUFLAG) --disk-rom microdis.rom -d "$(CURDIR)/build/oricdemo_floppy.dsk"
+
+# -------------------------------------------------------------------------
 # USB stick transfer -- variable declarations
 # -------------------------------------------------------------------------
 # Set USBPATH in .env (gitignored) -- path to the directory on the USB stick.
