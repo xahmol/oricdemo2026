@@ -1,0 +1,43 @@
+; disk_script_demo.txt - FloppyBuilder script for the REAL demo (bird +
+; background + music, src/main.c on include/oric_crt_floppy_hires.c) --
+; sibling to disk_script.txt (which builds src/floppy_test.c's regression
+; disk instead). Same structure/mechanism, driven by -D defines from the
+; Makefile, run TWICE per build (see docs/floppy.md's two-pass build note).
+; The only real difference from disk_script.txt: no PAYLOAD_BIN entry --
+; the real demo doesn't need floppy_test.c's floppy_load() smoke-test
+; payload, just the music file.
+
+FormatVersion 1.0
+DefineDisk 2 80 17
+OutputLayoutFile {LAYOUT_HEADER}
+OutputFloppyFile {DISK_IMAGE}
+SetCompressionMode None
+
+; Track 0, sectors 1/2/3: see disk_script.txt's own comments for why these
+; exact fixed sectors are required (Microdisc EPROM directory sanity check
+; + Jasmin-slot signature) -- identical requirement regardless of which
+; demo ends up on the disk.
+SetPosition 0 1
+WriteSector {SECTOR1_HEADER_BIN}
+
+SetPosition 0 2
+WriteSector {BOOTSECTOR_BIN}
+
+SetPosition 0 3
+WriteSector {DIRECTORY_SANITY_BIN}
+
+; Track 0, sector 4: must match bootsector_microdisc.c's own
+; LOADER_TRACK/LOADER_SECTOR #defines exactly.
+SetPosition 0 4
+WriteLoader {LOADER_BIN} {LOADER_LOAD_ADDR}
+
+; Track 0, sector 10: the demo binary itself (tools/floppy/loader.c's
+; boot-handoff target, file index 0 -- never loaded via floppy_load()).
+SetPosition 0 10
+AddFile {DEMO_BIN}
+AddDefine LOADER_DEMO_FILE {FileIndex}
+
+; File index 1: assets/oxygene4.pt3, loaded via pt3_load(1) (STORAGE_FLOPPY)
+; -- see src/main.c's MUSIC_FILE.
+AddFile {MUSIC_BIN}
+AddDefine LOADER_MUSIC_FILE {FileIndex}

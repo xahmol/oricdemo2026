@@ -86,20 +86,13 @@ else
     # test_boot.sh's own LOCI-backed check) -- pt3_init()+one pt3_tick()
     # computes these AY register values.
     check_found "PT3 tune loaded"           "PT3 tune loaded, AY regs:"      "$BOOT_DUMP"
-    # NOTE: byte 7 (the mixer register) reads 3F here vs. test_boot.sh's 3C
-    # for the byte-identical tape/LOCI run of the same fixture -- a real,
-    # confirmed discrepancy (bits 0/1, channels A/B, read as disabled here
-    # despite pt3_chan[0/1].enabled and .vibrato_audible both reading true
-    # in the same RAM dump, i.e. pt3_channel_tick()'s inputs are identical
-    # on both targets). Narrowed down but not root-caused: the module data
-    # loads byte-for-byte correctly (checked directly against the fixture),
-    # and the persistent per-channel state matches the tape/LOCI target
-    # exactly, so the divergence is somewhere in pt3_tick()'s own locally-
-    # computed mixer byte specifically on this target -- see docs/floppy.md's
-    # "Known issues" section. Asserting the OBSERVED value here (not the
-    # tape/LOCI target's 3C) so this test reflects actual, verified behavior
-    # rather than an assumption.
-    check_found "PT3 AY registers"          "79 07 BD 03 00 00 00 3F 0F 0A 00 00 00" "$BOOT_DUMP"
+    # Was 3F here (vs. test_boot.sh's 3C for the byte-identical tape/LOCI
+    # run) until tools/floppy/loader.c's LoadData byte-count bug was fixed
+    # (see that file's own comment) -- the module's tail sat in the final,
+    # non-256-aligned partial sector, which the buggy decrement logic
+    # silently never loaded, corrupting the mixer byte specifically. Now
+    # correctly matches the tape/LOCI target's 3C on both platforms.
+    check_found "PT3 AY registers"          "79 07 BD 03 00 00 00 3C 0F 0A 00 00 00" "$BOOT_DUMP"
     check_found "exit prompt renders"       "Press any key to exit"         "$BOOT_DUMP"
 fi
 

@@ -15,37 +15,59 @@ library set below (`include/`) were carried over from two sibling projects that 
 the same build chain: `OricScreenEditorLOCI` and `locifilemanager-v2` (both at
 `~/git/`).
 
-**Three runtimes, three programs.** `include/oric_crt.c` (default),
-`include/oric_crt_hires.c` (HIRES mode), and `include/oric_crt_floppy.c`
-(floppy-disk target) are separate, incompatible region layouts — see
-[docs/hires.md](docs/hires.md#memory-layout--the-oric_crt_hiresc-runtime) for
-why the HIRES bitmap needs `$9800-$BFDF` (which the default runtime uses for
-code/data/stack), and [docs/floppy.md](docs/floppy.md) for the floppy target's
-own layout and boot mechanics. `src/main.c` builds with the default runtime;
-`src/hires_test.c` builds with the HIRES runtime; `src/floppy_test.c` builds
-with the floppy runtime. Never mix runtimes for the same program.
+**Four runtimes, four programs.** `include/oric_crt.c` (default),
+`include/oric_crt_hires.c` (HIRES mode), `include/oric_crt_floppy.c`
+(floppy-disk target, TEXT-mode), and `include/oric_crt_floppy_hires.c`
+(floppy-disk target, HIRES mode) are separate, incompatible region layouts —
+see [docs/hires.md](docs/hires.md#memory-layout--the-oric_crt_hiresc-runtime)
+for why HIRES bitmap graphics need `$9800-$BFDF` (which the default/floppy
+runtimes use for code/data/stack), and [docs/floppy.md](docs/floppy.md) for
+the floppy target's own layout and boot mechanics.
+`oric_crt_floppy_hires.c` merges `oric_crt_hires.c`'s memory layout with
+`oric_crt_floppy.c`'s boot-handoff entry mechanics — needed because a
+floppy-target program that also wants HIRES graphics needs both at once.
+`src/main.c` (the real demo, HIRES) builds with `oric_crt_hires.c` for the
+tape target and `oric_crt_floppy_hires.c` for the floppy target (the SAME
+source file, `#ifdef STORAGE_FLOPPY` picks the one difference: `pt3_load()`'s
+signature — see that file); `src/buildtest.c` builds with the default
+runtime (TEXT-mode build-chain/LOCI/PT3 regression coverage, not demo
+content); `src/hires_test.c` builds with `oric_crt_hires.c` too (a separate,
+library-only test fixture, not demo content either); `src/floppy_test.c`
+builds with `oric_crt_floppy.c` (the floppy target's own regression
+fixture, analogous to `buildtest.c`). Never mix runtimes for the same
+program.
 
-**Two distribution targets.** The tape/LOCI target (`all`/`run`/`usb`, below)
-needs a LOCI device for multi-file storage and can't run in plain Oricutron
-(LOCI isn't emulated there). The floppy-disk target (`disk`/`run-disk`/
-`test-disk`) is a bootable Microdisc `.dsk` image needing no LOCI device and
-no DOS/SEDORIC resident — see [docs/floppy.md](docs/floppy.md). Both targets
-are built and tested completely independently.
+**Two distribution targets, both now the real demo.** The tape target
+(`all`/`run`/`usb`, below) and the floppy-disk target (`disk`/`run-disk`)
+are BOTH the real demo (`src/main.c` + `src/section_*.c`) — no "simple tap
+only" version. Tape/LOCI no longer depends on LOCI for graphics (only for
+loading its music file at runtime), so it runs fine in plain Oricutron,
+including real AY audio (Oricutron emulates AY audio; Phosphoric doesn't —
+see `make run-phos` below). The floppy-disk target is a bootable Microdisc
+`.dsk` image needing no LOCI device and no DOS/SEDORIC resident, with the
+music file baked into the disk image instead — see
+[docs/floppy.md](docs/floppy.md). Both targets are built and tested
+completely independently, and both source the SAME `src/main.c`/
+`src/section_*.c` content.
 
 Build chain (see `Makefile`):
 ```
-make            # compile -> build/oricdemo.bin (Oscar64) -> build/oricdemo.tap (tools/mktap.py)
-make run        # launch build/oricdemo.tap in Oricutron (needs ORICUTRON_HOME)
-make test       # Phosphoric boot smoke test + oric_pictconv.py unit tests
+make            # compile -> build/oricdemo.bin (Oscar64, HIRES runtime) -> build/oricdemo.tap
+make run        # launch the real demo (build/oricdemo.tap) in Oricutron (needs ORICUTRON_HOME)
+make run-phos   # launch src/buildtest.c (build/buildtest.tap) visually in Phosphoric instead --
+                # the build-chain/LOCI/PT3 regression test, not the real demo (see above)
+                # (needs PHOSDIR in .env; oric1-emu must be built with SDL2=1)
+make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.py unit tests
 make test-hires # opt-in: HIRES library Phosphoric smoke test (separate .tap, oric_crt_hires.c)
 make test-pictconv # oric_pictconv.py unit tests alone (pure Python, no emulator)
 make test-capture CYCLES=N TYPEKEYS='...'   # calibration helper, dumps RAM+screenshot, no assertions
-make usb        # copy build/oricdemo.tap to USBPATH (set in .env)
+make usb        # copy build/oricdemo.tap + assets/oxygene4.pt3 (real demo + music) to USBPATH (.env)
 make docs       # README.md -> README.pdf (needs pandoc)
-make zip        # release ZIP (build/oricdemo.tap + README.pdf)
-make disk       # floppy-disk target -> build/oricdemo_floppy.dsk (see docs/floppy.md)
-make run-disk   # launch build/oricdemo_floppy.dsk in Oricutron with --disk-rom microdisc.rom
-make test-disk  # opt-in: floppy target Phosphoric smoke test (needs DISKROM, see docs/floppy.md)
+make zip        # release ZIP (build/oricdemo.tap + assets/oxygene4.pt3 + README.pdf)
+make disk       # floppy-disk target, REAL demo -> build/oricdemo_floppy.dsk (see docs/floppy.md)
+make run-disk   # launch build/oricdemo_floppy.dsk (real demo) in Oricutron with --disk-rom microdisc.rom
+make test-disk  # opt-in: src/floppy_test.c's OWN regression disk (build/floppytest.dsk, separate
+                # from 'disk' above -- see docs/floppy.md), Phosphoric smoke test (needs DISKROM)
 make clean
 ```
 `OSCAR64_HOME` defaults to `~/oscar64`, `ORICUTRON_HOME` to `~/oricutron` if unset.
@@ -56,21 +78,41 @@ make clean
 
 ## Source layout
 
-- `src/main.c` — TEXT-mode entry point (default runtime). Currently a build-chain
-  smoke test: inits the TEXT-mode libraries below and reports LOCI/IJK detection
-  status on screen, plus two PT3 decode-correctness checks (loads
+- `src/main.c` — the real demo's entry point, HIRES mode, built for BOTH
+  distribution targets (`oric_crt_hires.c` for tape, `oric_crt_floppy_hires.c`
+  for floppy — same source, `#ifdef STORAGE_FLOPPY` only changes which
+  `pt3_load()` overload/music-file-reference is used). A thin sequencer:
+  `hires_init()`/mode-switch/colour baseline/footer, starts PT3 background
+  music (`assets/oxygene4.pt3`) ticking via a 50Hz raster IRQ, then calls
+  each `src/section_*.c` effect module in turn (Oscar64 `#pragma compile`
+  chain, see `src/section_bird.h`). Currently one section.
+- `src/section_bird.c`/`.h` — first demo section: an animated bird flying
+  both horizontally (byte-aligned XOR sprite via `include/sprite.h`,
+  7-frame walk cycle) and vertically (a sine wave via `include/fixedmath.h`'s
+  `oric_sin()`), a nod to the animated bird in the original "Welcome to
+  Oric Atmos" demo (oric.org/software/welcome_to_oric_atmos-593.html).
+  Frame data is `assets/bird.h`.
+- `src/buildtest.c` — TEXT-mode build-chain regression test (default
+  `oric_crt.c` runtime; NOT demo content, not built by `all`/`usb`/`zip`).
+  Inits the TEXT-mode libraries and reports LOCI/IJK detection status on
+  screen, plus two PT3 decode-correctness checks (loads
   `tests/fixtures/music.pt3` for one tick, then `music_effects.pt3` for five
   ticks exercising portamento/vibrato/envelope-glide, printing the computed
   AY register values each time — see `docs/pt3.md`'s Verification section).
+  Exercised by `make test`/`make run-phos`. This is what used to live in
+  `src/main.c` before that became the real demo above.
 - `src/hires_test.c` — HIRES-mode entry point (`oric_crt_hires.c` runtime). Growing
   test fixture for `include/hires.c`/`ttf.c`, exercised by `make test-hires` —
   not demo content, see `tests/scripts/test_hires.sh` for what's asserted.
-- `src/floppy_test.c` — floppy-disk target entry point (`oric_crt_floppy.c`
-  runtime, entered via `tools/floppy/loader.c`'s boot handoff, not tape
-  auto-run). Growing test fixture for `include/floppy.c`/the resident
-  loader/`pt3.c`'s `STORAGE_FLOPPY` backend, exercised by `make test-disk` —
-  not demo content, see `docs/floppy.md` and `tests/scripts/test_disk.sh`
-  for what's asserted.
+- `src/floppy_test.c` — the floppy target's OWN build-chain regression test
+  (default `oric_crt_floppy.c` runtime, TEXT-mode; entered via
+  `tools/floppy/loader.c`'s boot handoff, not tape auto-run) — analogous to
+  `src/buildtest.c` on the tape/LOCI side. NOT demo content, not built by
+  `disk`/`run-disk`. Exercises `include/floppy.c`/the resident loader/
+  `pt3.c`'s `STORAGE_FLOPPY` backend, exercised by `make test-disk` (its
+  own separate disk image, `build/floppytest.dsk`, distinct from the real
+  demo's `build/oricdemo_floppy.dsk`) — see `docs/floppy.md` and
+  `tests/scripts/test_disk.sh` for what's asserted.
 - `src/strings.h` / `src/strings_en.h` — localisation gateway (`LANG=FR` ->
   `-dLANG_FR` selects `strings_fr.h`, not yet created). Only holds the two
   `MSG_*` strings `include/loci.c` needs; add app strings here as the demo grows.
@@ -175,15 +217,22 @@ make clean
     (not just bare `--loci`) for `pt3_load()`'s `file_load()` to actually
     find them.
   - `tests/sandbox/`, `tests/out/` — gitignored scratch, regenerated per run.
+- `assets/` — real demo assets consumed by `src/section_*.c` files (as opposed
+  to `tests/fixtures/`, which only test scaffolding uses). `assets/bird.h` —
+  7-frame walk-cycle sprite data for `src/section_bird.c`, adapted from
+  mihai-dragan's `oric_BAS` project (MIT License), github.com/xahmol/sprites
+  — see that file's header comment for the full attribution note.
 - `oscar64manual.md` — Oscar64 compiler reference; `docs/` — per-library API
   reference (`docs/README.md` is the index); consult before re-deriving
   Oscar64 compiler behavior or library APIs from scratch.
 
 ## Notes
 
-- `src/main.c`/`src/hires_test.c`/`src/floppy_test.c` are build-chain smoke
-  tests proving each runtime end-to-end (`make test`/`make test-hires`/
-  `make test-disk`), not demo content — replace them with actual effects.
+- `src/buildtest.c`/`src/hires_test.c`/`src/floppy_test.c` are build-chain
+  smoke tests proving each runtime end-to-end (`make test`/`make test-hires`/
+  `make test-disk`), not demo content. `src/main.c` (+ `src/section_*.c`) IS
+  the real demo content now, built for both distribution targets — extend
+  it with more `src/section_*.c` effect modules as the demo grows.
 - The TEXT-mode `include/` library files (`charwin`, `keyboard`, `charset`,
   `ijk`, `loci`) are shared with `OricScreenEditorLOCI` and `locifilemanager-v2`
   but have already diverged between those two (they are copies, not a shared

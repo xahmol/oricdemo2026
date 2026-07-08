@@ -45,19 +45,37 @@ Chema/Fabrice), a dead end not used here.
 
 ## Two build targets, not one
 
-| | Tape/LOCI (`all`/`run`/`usb`) | Floppy (`disk`/`run-disk`/`test-disk`) |
+Both targets build the SAME real demo (`src/main.c` + `src/section_*.c`,
+HIRES mode) — there is no plain "simple tap, no LOCI/floppy" version.
+Each also has its own SEPARATE build-chain regression fixture (not demo
+content, analogous to each other):
+
+| | Tape/LOCI (`all`/`run`/`usb`) | Floppy (`disk`/`run-disk`) |
 |---|---|---|
-| Runtime | `include/oric_crt.c` | `include/oric_crt_floppy.c` |
-| Entry point | `src/main.c` | `src/floppy_test.c` |
-| Storage backend | `include/loci.c` (needs a LOCI device) | `include/floppy.c` (needs nothing but the disk itself) |
-| Runs in plain Oricutron | No (LOCI unemulated) | Yes |
+| Runtime | `include/oric_crt_hires.c` | `include/oric_crt_floppy_hires.c` |
+| Entry point | `src/main.c` (real demo) | `src/main.c` (real demo, same source) |
+| Storage backend | `include/loci.c` (needs a LOCI device, for the music file only) | `include/floppy.c` (needs nothing but the disk itself) |
+| Runs in plain Oricutron | Yes (no longer needs LOCI for graphics) | Yes |
 | File addressing | Runtime path string | Compile-time integer index |
 | `pt3_load()` signature | `bool pt3_load(const char *path)` | `bool pt3_load(uint8_t file_index)` (`STORAGE_FLOPPY`) |
+| Regression fixture | `src/buildtest.c` (`make test`, default `oric_crt.c` runtime) | `src/floppy_test.c` (`make test-disk`, default `oric_crt_floppy.c` runtime, own separate `build/floppytest.dsk`) |
 
-Both targets are built independently; nothing about the floppy target
-changes the tape/LOCI pipeline, and vice versa (same "two separate builds
-for two runtimes" pattern already established by `oric_crt.c` vs.
-`oric_crt_hires.c` for HIRES mode).
+`include/oric_crt_floppy_hires.c` merges `oric_crt_hires.c`'s HIRES memory
+layout with `oric_crt_floppy.c`'s boot-handoff entry mechanics — see that
+file's own header comment for why a plain combination (not a redesign) was
+sufficient (the two runtimes' region reservations don't overlap).
+
+Both targets are built independently; nothing about the floppy target's
+build changes the tape/LOCI pipeline's build, and vice versa (same "two
+separate builds for two runtimes" pattern already established by
+`oric_crt.c` vs. `oric_crt_hires.c`). The real demo's own two-pass build
+(`build/floppy_*` artifacts, `tools/floppy/disk_script_demo.txt`) and
+`floppy_test.c`'s regression build (`build/floppytest_*` artifacts, its own
+`build/floppytest/floppy_directory.h` subdirectory to avoid colliding with
+the real demo's generated header, `tools/floppy/disk_script.txt`) are
+entirely separate pipelines in the Makefile, sharing only the
+loader/bootsector SOURCE (not compiled output — each pipeline compiles its
+own copy with its own demo track/sector/size baked in).
 
 ## `tools/oric_floppybuilder.py` — script DSL
 
@@ -277,18 +295,22 @@ size) — a circular dependency, resolved via two compile passes:
 4. Run `tools/oric_floppybuilder.py build` to produce the final `.dsk`,
    embedding the final demo binary, boot sector, and loader.
 
-Makefile targets: `disk` (builds `build/oricdemo_floppy.dsk`), `run-disk`
-(launches Oricutron with `--disk-rom microdisc.rom -d ...`), `test-disk`
-(headless Phosphoric verification, see below).
+Makefile targets: `disk` (builds `build/oricdemo_floppy.dsk`, the REAL demo,
+via `tools/floppy/disk_script_demo.txt`), `run-disk` (launches Oricutron
+with `--disk-rom microdisc.rom -d ...`), `test-disk` (headless Phosphoric
+verification of `src/floppy_test.c`'s SEPARATE regression disk,
+`build/floppytest.dsk`, via `tools/floppy/disk_script.txt` — see below).
 
 ## Testing
 
 `tests/scripts/test_disk.sh` (`make test-disk`), mirroring `test_boot.sh`'s
-structure: boots `build/oricdemo_floppy.dsk` under Phosphoric's Microdisc
-emulation (`--disk-rom`, no LOCI/tape at all) and asserts `src/floppy_test.c`'s
-status lines render, including a `floppy_load()` payload check and a
-`pt3_load(file_index)` + one-tick AY-register-shadow assertion (same spirit
-as `test_boot.sh`'s own `music.pt3` check).
+structure: boots `build/floppytest.dsk` (`src/floppy_test.c`'s own
+regression build, NOT the real demo's `build/oricdemo_floppy.dsk`) under
+Phosphoric's Microdisc emulation (`--disk-rom`, no LOCI/tape at all) and
+asserts `src/floppy_test.c`'s status lines render, including a
+`floppy_load()` payload check and a `pt3_load(file_index)` + one-tick
+AY-register-shadow assertion (same spirit as `test_boot.sh`'s own
+`music.pt3` check).
 
 **What Phosphoric genuinely cannot verify**: Jasmin (not emulated at all —
 moot, v1 is Microdisc-only); the self-relocating boot sector's behavior
@@ -365,21 +387,31 @@ worth knowing if this code is touched again:
   still reading (and discarding) the rest of the sector to keep the FDC
   transfer protocol correctly synced. See `tools/floppy/loader.c`'s
   `fetch_byte`/`seek_done` comments.
-- **Still open, narrow, and not blocking core functionality**: the AY
-  mixer register (byte 7 of `pt3_tick()`'s computed output) reads `0x3F`
-  on this target for the same `tests/fixtures/music.pt3` fixture that
-  produces `0x3C` on the tape/LOCI target — a real, confirmed discrepancy
-  (bits 0/1, channels A/B, computed as disabled here). Narrowed down but
-  not root-caused: the module data loads byte-for-byte identically on both
-  targets (checked directly against the fixture), and the persistent
-  per-channel state (`pt3_chan[].enabled`/`.vibrato_audible`) reads
-  identically on both targets too — so the divergence is somewhere in
-  `pt3_tick()`'s own locally-computed mixer byte specifically on this
-  target, not in loading or in persistent channel state. Every other AY
-  register (tone, amplitude, noise period) matches exactly.
-  `tests/scripts/test_disk.sh` asserts the actually-observed `0x3F` value
-  (not the tape/LOCI target's `0x3C`), so the test reflects real, verified
-  behavior rather than an unverified assumption.
+- **RESOLVED (was "still open, narrow, not blocking"): the AY mixer
+  register (byte 7 of `pt3_tick()`'s computed output) used to read `0x3F`
+  on this target for `tests/fixtures/music.pt3` vs. `0x3C` on the tape/LOCI
+  target.** Root cause was a genuine second bug in `LoadData`'s byte-count
+  decrement logic (distinct from the partial-sector *storage* bug above):
+  when `l_bytes_hi` was nonzero (a full sector just read) and decrementing
+  it landed on exactly 0, execution fell through into the `l_bytes_hi==0`
+  path and zeroed `l_bytes_lo` — even though `l_bytes_lo` held a genuine
+  nonzero count for one more, final partial-sector read still owed. That
+  final partial sector then silently never loaded at all (the
+  `l_bytes_lo|l_bytes_hi==0` check at the top of the loop saw "done"
+  immediately). `music.pt3` is 600 bytes (2×256 + 88, not a sector
+  multiple), so its last 88 bytes were dropped on every floppy-target
+  load — corrupting the module's tail and, with it, the computed mixer
+  byte specifically. An earlier investigation (see the old version of this
+  note, or `tests/scripts/test_disk.sh`'s git history) checked the module
+  data "byte-for-byte against the fixture" and found it matching, which is
+  presumably why this wasn't caught then — the loaded copy in RAM was
+  wrong, not the on-disk fixture used for that comparison. Fixed by making
+  the post-decrement branch in `sector_ok` unconditional (`jmp after_sub`
+  instead of a conditional fallthrough that could reach the
+  `l_bytes_lo`-zeroing path from the wrong branch) — see
+  `tools/floppy/loader.c`'s `sector_ok` comment for the full trace. Now
+  correctly reads `0x3C` on both targets; `tests/scripts/test_disk.sh`
+  asserts the corrected value.
 - **`tools/floppy/loader.c`'s boot handoff must jump to the runtime's
   `startup` region (`$0500`), not straight into `main()` (`$0580`).** The
   Makefile must pass `-dDEMO_ADDRESS=0x0500` to every `loader.c` compile —

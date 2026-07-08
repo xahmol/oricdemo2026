@@ -57,15 +57,20 @@ PROGNAME  = ORICDEMO
 LOAD_ADDR = 0x0500
 
 # -------------------------------------------------------------------------
-# Compiler flags
+# Compiler flags -- the real demo (src/main.c) builds against the HIRES
+# runtime, not the default oric_crt.c: it's a sequencer over src/section_*.c
+# effect modules (see MAIN_SRCS below), and HIRES bitmap graphics require
+# include/oric_crt_hires.c's shrunk memory layout (see include/hires.h's
+# header comment). -i=assets picks up asset headers like assets/bird.h.
 # -------------------------------------------------------------------------
 
 CFLAGS = \
   -n              \
   -tf=bin         \
-  -rt=include/oric_crt.c \
+  -rt=include/oric_crt_hires.c \
   -i=include      \
   -i=src          \
+  -i=assets       \
   -O2             \
   -dNOFLOAT       \
   -dVERSION_MAJOR=$(VERSION_MAJOR) \
@@ -80,8 +85,56 @@ CFLAGS = \
 
 MAIN_SRCS = \
   src/main.c            \
+  src/section_bird.c    \
+  src/section_bird.h    \
+  assets/bird.h         \
+  assets/oxygene4.pt3   \
+  include/oric_crt_hires.c \
+  include/crt_math.c    \
+  include/oric.h        \
+  include/hires.c       \
+  include/hires.h       \
+  include/sprite.c      \
+  include/sprite.h      \
+  include/fixedmath.c   \
+  include/fixedmath.h   \
+  include/pt3.c         \
+  include/pt3.h         \
+  include/ay.c          \
+  include/ay.h          \
+  include/rasterirq.c   \
+  include/rasterirq.h   \
+  include/loci.c        \
+  include/loci.h
+
+# -------------------------------------------------------------------------
+# Build-chain regression test (src/buildtest.c, default oric_crt.c runtime)
+# -- what used to live in src/main.c before it became the real HIRES demo
+# above. Not part of 'all'/'usb'/'zip'; only 'make test' builds this (via
+# sandbox-reset's dependency on build/buildtest.tap below), and 'make
+# run-phos' launches it visually in Phosphoric (it's the target that
+# actually exercises LOCI, which the real demo no longer touches).
+# -------------------------------------------------------------------------
+
+MAIN_BUILDTEST     = buildtest
+PROGNAME_BUILDTEST = BUILDTEST
+
+CFLAGS_BUILDTEST = \
+  -n              \
+  -tf=bin         \
+  -rt=include/oric_crt.c \
+  -i=include      \
+  -i=src          \
+  -O2             \
+  -dNOFLOAT       \
+  -dVERSION_MAJOR=$(VERSION_MAJOR) \
+  -dVERSION_MINOR=$(VERSION_MINOR) \
+  -dVERSION_PATCH=$(VERSION_PATCH)
+
+MAIN_BUILDTEST_SRCS = \
+  src/buildtest.c       \
   src/strings.h         \
-  src/strings_en.h       \
+  src/strings_en.h      \
   include/oric_crt.c    \
   include/crt_math.c    \
   include/oric.h        \
@@ -161,18 +214,17 @@ MAIN_HIRES_SRCS = \
 # two files' FDC register constants. If you change one, change the other.
 # -------------------------------------------------------------------------
 
-FLOPPY_MAIN            = floppy_test
-FLOPPY_PROGNAME        = FLOPPYDEMO
 FLOPPY_LOADER_ADDRESS  = 0xFA00
-# The demo's ENTRY point must be include/oric_crt_floppy.c's "startup"
-# region ($0500, where oric_startup's SEI/BSS-clear/ZP-clear/stack-setup
-# lives), NOT $0580 (the "main" region, i.e. main() itself) -- jumping
-# straight to $0580 skips all of that init, leaving interrupts enabled and
-# the software stack/BSS/ZP uninitialized. tools/floppy/loader.c defaults
+# The demo's ENTRY point must be its own runtime's "startup" region ($0500,
+# where oric_startup's SEI/BSS-clear/ZP-clear/stack-setup lives), NOT
+# $0580 (the "main" region, i.e. main() itself) -- jumping straight to
+# $0580 skips all of that init, leaving interrupts enabled and the
+# software stack/BSS/ZP uninitialized. tools/floppy/loader.c defaults
 # DEMO_ADDRESS to $0580 if never told otherwise, so this MUST be passed
 # explicitly to every loader.c compile below (confirmed empirically: the
 # demo hung early, with an interrupt vectoring into uninitialized zero-page
-# garbage at $0245, before this fix).
+# garbage at $0245, before this fix). Shared by both pipelines below (real
+# demo and floppytest regression) -- same convention either way.
 FLOPPY_DEMO_ENTRY_ADDRESS = 0x0500
 
 CFLAGS_FLOPPY_RT = \
@@ -181,25 +233,43 @@ CFLAGS_FLOPPY_RT = \
   -i=include      \
   -O1
 
+# ===========================================================================
+# PIPELINE 1: the REAL demo (bird + background + music), on
+# include/oric_crt_floppy_hires.c -- what 'disk'/'run-disk' build. Uses the
+# ORIGINAL simple artifact names (build/floppy_*.bin, build/oricdemo_floppy.dsk)
+# since this is the primary, user-facing floppy target, matching how
+# src/main.c (not src/buildtest.c) owns the plain 'build/oricdemo.tap' name
+# on the tape/LOCI side.
+# ===========================================================================
+
+FLOPPY_PROGNAME        = ORICDEMO
+
 CFLAGS_FLOPPY_DEMO = \
   -n              \
   -tf=bin         \
-  -rt=include/oric_crt_floppy.c \
+  -rt=include/oric_crt_floppy_hires.c \
   -i=include      \
   -i=src          \
+  -i=assets       \
   -O2             \
   -dNOFLOAT       \
   -dSTORAGE_FLOPPY
 
 FLOPPY_SRCS = \
-  src/floppy_test.c        \
-  include/oric_crt_floppy.c \
+  src/main.c               \
+  src/section_bird.c       \
+  src/section_bird.h       \
+  assets/bird.h            \
+  assets/oxygene4.pt3      \
+  include/oric_crt_floppy_hires.c \
   include/crt_math.c       \
   include/oric.h           \
-  include/charwin.c        \
-  include/charwin.h        \
-  include/keyboard.c       \
-  include/keyboard.h       \
+  include/hires.c          \
+  include/hires.h          \
+  include/sprite.c         \
+  include/sprite.h         \
+  include/fixedmath.c      \
+  include/fixedmath.h      \
   include/floppy.c         \
   include/floppy.h         \
   include/rasterirq.c      \
@@ -212,10 +282,10 @@ FLOPPY_SRCS = \
 FLOPPY_LOADER_SRCS = tools/floppy/loader.c
 FLOPPY_BOOTSECTOR_SRCS = tools/floppy/bootsector_microdisc.c
 
-# Test fixtures baked into the disk image (see src/floppy_test.c's own
-# file-index convention comment: 0 = itself, 1 = payload, 2 = music).
-FLOPPY_PAYLOAD_BIN = tests/fixtures/floppy_payload_test.bin
-FLOPPY_MUSIC_BIN   = tests/fixtures/music.pt3
+# File index 0 = the demo itself (boot handoff); 1 = assets/oxygene4.pt3,
+# via pt3_load(1) (STORAGE_FLOPPY) -- see src/main.c's MUSIC_FILE and
+# tools/floppy/disk_script_demo.txt.
+FLOPPY_MUSIC_BIN = assets/oxygene4.pt3
 
 # -------------------------------------------------------------------------
 # Two-pass build (see docs/floppy.md):
@@ -257,7 +327,7 @@ build/floppy_demo_pass1.bin: $(FLOPPY_SRCS) tests/fixtures/floppy_directory_plac
 	@$(MKDIR) build 2>$(NULLDEV) ; true
 	cp tests/fixtures/floppy_directory_placeholder.h build/floppy_directory.h
 	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
-	    -o=build/floppy_demo_pass1.bin src/floppy_test.c
+	    -o=build/floppy_demo_pass1.bin src/main.c
 
 build/floppy_bootsector_compiled.bin: $(FLOPPY_BOOTSECTOR_SRCS)
 	@$(MKDIR) build 2>$(NULLDEV) ; true
@@ -275,8 +345,8 @@ build/floppy_bootsector.bin: build/floppy_bootsector_compiled.bin
 # NOTE: oric_floppybuilder.py resolves script-relative paths against the
 # SCRIPT's own directory (tools/floppy/), not the caller's cwd -- so every
 # -D path here is made absolute via $(CURDIR) to sidestep that entirely.
-build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
-	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script.txt \
+build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/floppy_init.dsk \
 	    -D BOOTSECTOR_BIN=$(CURDIR)/build/floppy_bootsector.bin \
@@ -285,7 +355,6 @@ build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_
 	    -D LOADER_BIN=$(CURDIR)/build/floppy_loader_placeholder.bin \
 	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
 	    -D DEMO_BIN=$(CURDIR)/build/floppy_demo_pass1.bin \
-	    -D PAYLOAD_BIN=$(CURDIR)/$(FLOPPY_PAYLOAD_BIN) \
 	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN)
 
 # Real values, parsed out of the generated header by the shell (make has
@@ -306,10 +375,10 @@ build/floppy_loader.bin: build/floppy_directory.h $(FLOPPY_LOADER_SRCS)
 
 build/floppy_demo.bin: build/floppy_directory.h $(FLOPPY_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
-	    -o=build/floppy_demo.bin src/floppy_test.c
+	    -o=build/floppy_demo.bin src/main.c
 
-build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
-	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script.txt \
+build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/oricdemo_floppy.dsk \
 	    -D BOOTSECTOR_BIN=$(CURDIR)/build/floppy_bootsector.bin \
@@ -318,7 +387,6 @@ build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/f
 	    -D LOADER_BIN=$(CURDIR)/build/floppy_loader.bin \
 	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
 	    -D DEMO_BIN=$(CURDIR)/build/floppy_demo.bin \
-	    -D PAYLOAD_BIN=$(CURDIR)/$(FLOPPY_PAYLOAD_BIN) \
 	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN)
 
 disk: build/oricdemo_floppy.dsk
@@ -327,10 +395,117 @@ run-disk: build/oricdemo_floppy.dsk
 	cd $(ORICUTRON_HOME) && \
 	    $(EMUL) $(EMUFLAG) --disk-rom microdis.rom -d "$(CURDIR)/build/oricdemo_floppy.dsk"
 
-test-disk: check-phosphoric build/oricdemo_floppy.dsk
+# ===========================================================================
+# PIPELINE 2: src/floppy_test.c's own regression fixture, on the DEFAULT
+# include/oric_crt_floppy.c runtime -- analogous to src/buildtest.c on the
+# tape/LOCI side (see that section's own comment). NOT demo content; only
+# 'make test-disk' builds this. Artifacts use a "floppytest_" prefix to
+# avoid colliding with PIPELINE 1's plain names above.
+# ===========================================================================
+
+FLOPPYTEST_PROGNAME = FLOPPYDEMO
+
+CFLAGS_FLOPPYTEST_DEMO = \
+  -n              \
+  -tf=bin         \
+  -rt=include/oric_crt_floppy.c \
+  -i=include      \
+  -i=src          \
+  -O2             \
+  -dNOFLOAT       \
+  -dSTORAGE_FLOPPY
+
+FLOPPYTEST_SRCS = \
+  src/floppy_test.c        \
+  include/oric_crt_floppy.c \
+  include/crt_math.c       \
+  include/oric.h           \
+  include/charwin.c        \
+  include/charwin.h        \
+  include/keyboard.c       \
+  include/keyboard.h       \
+  include/floppy.c         \
+  include/floppy.h         \
+  include/rasterirq.c      \
+  include/rasterirq.h      \
+  include/ay.c             \
+  include/ay.h             \
+  include/pt3.c            \
+  include/pt3.h
+
+# Test fixtures baked into the disk image (see src/floppy_test.c's own
+# file-index convention comment: 0 = itself, 1 = payload, 2 = music).
+FLOPPYTEST_PAYLOAD_BIN = tests/fixtures/floppy_payload_test.bin
+FLOPPYTEST_MUSIC_BIN   = tests/fixtures/music.pt3
+
+build/floppytest_loader_placeholder.bin: $(FLOPPY_LOADER_SRCS)
+	@$(MKDIR) build 2>$(NULLDEV) ; true
+	$(CC) $(CFLAGS_FLOPPY_RT) -rt=include/crt_math.c \
+	    -dDEMO_TRACK=0 -dDEMO_SECTOR=0 -dDEMO_SIZE=0 \
+	    -dLOADER_ADDRESS=$(FLOPPY_LOADER_ADDRESS) \
+	    -dDEMO_ADDRESS=$(FLOPPY_DEMO_ENTRY_ADDRESS) \
+	    -o=build/floppytest_loader_placeholder.bin tools/floppy/loader.c
+
+build/floppytest_demo_pass1.bin: $(FLOPPYTEST_SRCS) tests/fixtures/floppy_directory_placeholder.h
+	@$(MKDIR) build/floppytest 2>$(NULLDEV) ; true
+	cp tests/fixtures/floppy_directory_placeholder.h build/floppytest/floppy_directory.h
+	$(CC) $(CFLAGS_FLOPPYTEST_DEMO) -i=build/floppytest \
+	    -o=build/floppytest_demo_pass1.bin src/floppy_test.c
+
+build/floppytest_bootsector.bin: build/floppy_bootsector_compiled.bin
+	$(PY) tools/floppy/extract_bootsector.py \
+	    build/floppy_bootsector_compiled.bin \
+	    build/floppy_bootsector_compiled.map \
+	    build/floppytest_bootsector.bin
+
+build/floppytest/floppy_directory.h: build/floppytest_loader_placeholder.bin build/floppytest_demo_pass1.bin build/floppytest_bootsector.bin tools/floppy/disk_script.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+	@$(MKDIR) build/floppytest 2>$(NULLDEV) ; true
+	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script.txt \
+	    -D LAYOUT_HEADER=$(CURDIR)/build/floppytest/floppy_directory.h \
+	    -D DISK_IMAGE=$(CURDIR)/build/floppytest_init.dsk \
+	    -D BOOTSECTOR_BIN=$(CURDIR)/build/floppytest_bootsector.bin \
+	    -D DIRECTORY_SANITY_BIN=$(CURDIR)/tools/floppy/directory_sanity_sector.bin \
+	    -D SECTOR1_HEADER_BIN=$(CURDIR)/tools/floppy/sector1_header.bin \
+	    -D LOADER_BIN=$(CURDIR)/build/floppytest_loader_placeholder.bin \
+	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
+	    -D DEMO_BIN=$(CURDIR)/build/floppytest_demo_pass1.bin \
+	    -D PAYLOAD_BIN=$(CURDIR)/$(FLOPPYTEST_PAYLOAD_BIN) \
+	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPYTEST_MUSIC_BIN)
+
+FLOPPYTEST_DEMO_REAL_TRACK  = $(shell grep FloppyFileStartTrack  build/floppytest/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
+FLOPPYTEST_DEMO_REAL_SECTOR = $(shell grep FloppyFileStartSector build/floppytest/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
+FLOPPYTEST_DEMO_REAL_SIZE   = $(shell grep FloppyFileSize        build/floppytest/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
+
+build/floppytest_loader.bin: build/floppytest/floppy_directory.h $(FLOPPY_LOADER_SRCS)
+	$(CC) $(CFLAGS_FLOPPY_RT) -rt=include/crt_math.c \
+	    -dDEMO_TRACK=$(FLOPPYTEST_DEMO_REAL_TRACK) \
+	    -dDEMO_SECTOR=$(FLOPPYTEST_DEMO_REAL_SECTOR) \
+	    -dDEMO_SIZE=$(FLOPPYTEST_DEMO_REAL_SIZE) \
+	    -dLOADER_ADDRESS=$(FLOPPY_LOADER_ADDRESS) \
+	    -dDEMO_ADDRESS=$(FLOPPY_DEMO_ENTRY_ADDRESS) \
+	    -o=build/floppytest_loader.bin tools/floppy/loader.c
+
+build/floppytest_demo.bin: build/floppytest/floppy_directory.h $(FLOPPYTEST_SRCS)
+	$(CC) $(CFLAGS_FLOPPYTEST_DEMO) -i=build/floppytest \
+	    -o=build/floppytest_demo.bin src/floppy_test.c
+
+build/floppytest.dsk: build/floppytest_loader.bin build/floppytest_demo.bin build/floppytest_bootsector.bin tools/floppy/disk_script.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script.txt \
+	    -D LAYOUT_HEADER=$(CURDIR)/build/floppytest/floppy_directory.h \
+	    -D DISK_IMAGE=$(CURDIR)/build/floppytest.dsk \
+	    -D BOOTSECTOR_BIN=$(CURDIR)/build/floppytest_bootsector.bin \
+	    -D DIRECTORY_SANITY_BIN=$(CURDIR)/tools/floppy/directory_sanity_sector.bin \
+	    -D SECTOR1_HEADER_BIN=$(CURDIR)/tools/floppy/sector1_header.bin \
+	    -D LOADER_BIN=$(CURDIR)/build/floppytest_loader.bin \
+	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
+	    -D DEMO_BIN=$(CURDIR)/build/floppytest_demo.bin \
+	    -D PAYLOAD_BIN=$(CURDIR)/$(FLOPPYTEST_PAYLOAD_BIN) \
+	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPYTEST_MUSIC_BIN)
+
+test-disk: check-phosphoric build/floppytest.dsk
 	$(MKDIR) tests/out 2>$(NULLDEV) ; true
 	PHOS=$(PHOS) ATMOSROM=$(ATMOSROM) DISKROM=$(DISKROM) \
-	    DSKFILE=build/oricdemo_floppy.dsk OUT=tests/out \
+	    DSKFILE=build/floppytest.dsk OUT=tests/out \
 	    bash tests/scripts/test_disk.sh
 
 # -------------------------------------------------------------------------
@@ -384,7 +559,7 @@ CYCLES   ?= 8000000
 # all: must appear first so it is the default goal
 # =========================================================================
 
-.PHONY: all clean run docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
+.PHONY: all clean run run-phos docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
 
 all: build/$(MAIN).tap
 
@@ -399,6 +574,18 @@ build/$(MAIN).tap: build/$(MAIN).bin
 	    build/$(MAIN).bin \
 	    build/$(MAIN).tap \
 	    $(PROGNAME) \
+	    $(LOAD_ADDR)
+
+# Build-chain regression test -- see MAIN_BUILDTEST_SRCS/CFLAGS_BUILDTEST above.
+build/$(MAIN_BUILDTEST).bin: $(MAIN_BUILDTEST_SRCS)
+	@$(MKDIR) build 2>$(NULLDEV) ; true
+	$(CC) $(CFLAGS_BUILDTEST) -o=build/$(MAIN_BUILDTEST).bin src/buildtest.c
+
+build/$(MAIN_BUILDTEST).tap: build/$(MAIN_BUILDTEST).bin
+	$(PY) tools/mktap.py \
+	    build/$(MAIN_BUILDTEST).bin \
+	    build/$(MAIN_BUILDTEST).tap \
+	    $(PROGNAME_BUILDTEST) \
 	    $(LOAD_ADDR)
 
 # HIRES test fixture -- see MAIN_HIRES_SRCS/CFLAGS_HIRES above.
@@ -418,6 +605,23 @@ run: build/$(MAIN).tap
 	cd $(ORICUTRON_HOME) && \
 	    $(EMUL) $(EMUFLAG) "$(CURDIR)/build/$(MAIN).tap"
 
+# Launch the build-chain regression test (src/buildtest.c) visually in
+# Phosphoric instead of Oricutron (fast-loads the tape, auto-runs, and
+# mounts tests/fixtures as the LOCI flash root so pt3_load()'s "music.pt3"/
+# "music_effects.pt3" resolve, same as the headless test targets below).
+# This is buildtest, not the real demo (build/$(MAIN).tap) -- the real demo
+# no longer touches LOCI at all, so Oricutron ('make run', which also gives
+# real AY audio unlike Phosphoric) is the right tool for it; buildtest is
+# the one thing that still needs Phosphoric's LOCI emulation to verify.
+# Needs PHOSDIR in .env -- see check-phosphoric. Not headless: opens a real
+# emulator window; close it or Ctrl+C in the terminal to quit. Requires the
+# oric1-emu binary itself to have been built with 'make SDL2=1' in the
+# Phosphoric checkout -- a headless-only build opens no window and gives no
+# error about it.
+run-phos: check-phosphoric build/$(MAIN_BUILDTEST).tap
+	$(PHOS) -r $(ATMOSROM) \
+	    -t build/$(MAIN_BUILDTEST).tap -f --loci-flash tests/fixtures
+
 # -------------------------------------------------------------------------
 # USB stick transfer
 # -------------------------------------------------------------------------
@@ -436,6 +640,7 @@ check-usb:
 
 usb: check-usb all
 	cp build/$(MAIN).tap "$(USBPATH)/"
+	cp assets/oxygene4.pt3 "$(USBPATH)/"
 	@if [ "$(IS_WSL2)" = "1" ]; then \
 	    echo "WSL2: unmounting $(USBMOUNT)..."; \
 	    sudo umount $(USBMOUNT); \
@@ -447,7 +652,7 @@ usb: check-usb all
 # -------------------------------------------------------------------------
 # make test          -- full automated suite (currently: test-boot)
 # make test-capture CYCLES=N TYPEKEYS='...'
-#                    -- calibration helper: fast-loads oricdemo.tap under
+#                    -- calibration helper: fast-loads buildtest.tap under
 #                       Atmos BASIC 1.1, runs for CYCLES, dumps
 #                       tests/out/capture.bin (RAM) and tests/out/capture.png
 #                       (screenshot). No assertions -- used to find the
@@ -461,19 +666,19 @@ check-phosphoric:
 	@test -f "$(ATMOSROM)" || \
 	    (echo "ERROR: Atmos ROM not found at $(ATMOSROM)" && false)
 
-# Reset the test sandbox from checked-in fixtures + the freshly built tap,
-# so every test run starts from a known state.
-sandbox-reset: build/$(MAIN).tap
+# Reset the test sandbox from checked-in fixtures + the freshly built
+# buildtest tap, so every test run starts from a known state.
+sandbox-reset: build/$(MAIN_BUILDTEST).tap
 	$(RMDIR) tests/sandbox 2>$(NULLDEV) ; true
 	$(MKDIR) tests/sandbox 2>$(NULLDEV) ; true
 	cp -r tests/fixtures/. tests/sandbox/
 	find tests/sandbox -name '.gitkeep' -delete
-	cp build/$(MAIN).tap tests/sandbox/
+	cp build/$(MAIN_BUILDTEST).tap tests/sandbox/
 
 test-capture: check-phosphoric sandbox-reset
 	$(MKDIR) tests/out 2>$(NULLDEV) ; true
 	$(PHOS) -r $(ATMOSROM) \
-	    -t tests/sandbox/$(MAIN).tap -f --loci-flash tests/sandbox \
+	    -t tests/sandbox/$(MAIN_BUILDTEST).tap -f --loci-flash tests/sandbox \
 	    --headless -c $(CYCLES) \
 	    $(if $(TYPEKEYS),--type-keys '$(TYPEKEYS)') \
 	    --dump-ram-at $(CYCLES):tests/out/capture.bin \
@@ -484,7 +689,7 @@ test-capture: check-phosphoric sandbox-reset
 test-boot: check-phosphoric sandbox-reset
 	$(MKDIR) tests/out 2>$(NULLDEV) ; true
 	PHOS=$(PHOS) ATMOSROM=$(ATMOSROM) SANDBOX=tests/sandbox OUT=tests/out \
-	    TAPFILE=$(MAIN).tap \
+	    TAPFILE=$(MAIN_BUILDTEST).tap \
 	    bash tests/scripts/test_boot.sh
 
 test:
@@ -540,6 +745,7 @@ zip: all docs
 	$(MKDIR) build 2>$(NULLDEV) ; true
 	zip -j build/$(ZIPNAME).zip \
 	    build/$(MAIN).tap \
+	    assets/oxygene4.pt3 \
 	    README.pdf
 	@echo "Created build/$(ZIPNAME).zip"
 
@@ -550,3 +756,5 @@ zip: all docs
 clean:
 	$(DEL) build/$(MAIN).bin 2>$(NULLDEV) ; true
 	$(DEL) build/$(MAIN).tap 2>$(NULLDEV) ; true
+	$(DEL) build/$(MAIN_BUILDTEST).bin 2>$(NULLDEV) ; true
+	$(DEL) build/$(MAIN_BUILDTEST).tap 2>$(NULLDEV) ; true

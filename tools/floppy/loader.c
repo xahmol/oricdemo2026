@@ -379,12 +379,29 @@ sector_ok:
     // byte count by 256 (a full sector), clamping so a final partial
     // sector (<256 bytes remaining) correctly reaches exactly 0 rather
     // than wrapping negative and looping for more (nonexistent) sectors.
+    //
+    // A real, confirmed bug lived here (separate from the partial-sector
+    // STORAGE bug documented above, and from the one in docs/floppy.md's
+    // "Known issues"): when l_bytes_hi was nonzero (this sector was a full
+    // one) and decrementing it landed on exactly 0, execution fell through
+    // to sub_lo_only and zeroed l_bytes_lo -- even though l_bytes_lo held
+    // a genuine nonzero remaining-partial-sector count that still needed
+    // one more LoadData iteration. That final partial sector's read never
+    // happened at all (the l_bytes_lo|l_bytes_hi==0 check at next_sector
+    // saw "done" immediately), silently dropping the last
+    // (size mod 256) bytes of ANY transfer whose size isn't an exact
+    // multiple of 256 -- confirmed via a transfer ending exactly on this
+    // hi:1->0 transition with a nonzero low remainder (traced by hand
+    // against the compiled .asm and confirmed via RAM dump: a data table
+    // placed in that dropped tail read back as all-zero). `bne after_sub`
+    // must be unconditional here -- once l_bytes_hi was nonzero (a FULL
+    // sector was just read), l_bytes_lo is an independent count that must
+    // never be touched in this branch, regardless of what l_bytes_hi
+    // becomes after decrementing.
     lda l_bytes_hi
     beq sub_lo_only
     dec l_bytes_hi
-    bne after_sub
-    lda l_bytes_lo
-    beq after_sub
+    jmp after_sub
 sub_lo_only:
     lda #0
     sta l_bytes_lo

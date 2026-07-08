@@ -22,6 +22,15 @@ dispatch arithmetic hand-verified) vs. which parts use the well-established,
 cross-platform PT3 algorithm/format conventions instead of replicating that
 one 6502 implementation's specific hand-optimized instruction sequences.
 
+**Demo music**: `assets/oxygene4.pt3`, used by `src/main.c`, is also from
+`6502Nerd/dflat`'s own `Oric/software/project/pt3/tunes/` collection (same
+MIT-licensed repo as the player above) — a chiptune cover of Jean-Michel
+Jarre's "Oxygène IV". Used deliberately, understanding it's a cover of a
+commercial track (common, low-risk-in-practice demoscene convention for
+personal/non-commercial use — nearly every tune in that same `tunes/`
+collection is a cover of a well-known commercial track), distinct from the
+repo's own MIT-licensed code.
+
 ## API
 
 ```c
