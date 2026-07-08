@@ -13,6 +13,7 @@
 #include "hires.h"
 #include "pt3.h"
 #include "rasterirq.h"
+#include "section_background.h"
 #include "section_bird.h"
 
 // Background music: assets/oxygene4.pt3, from 6502Nerd/dflat's own
@@ -47,17 +48,13 @@ int main(void)
 
     hires_on(true);
 
-    // Establish a known white-ink/black-paper baseline for every row.
-    // Sections that colour their own sprites (see section_bird.c's
-    // HxsprColor use) rely on this being a fixed, predictable value to
-    // restore to -- ink/paper attributes cascade rightward from wherever
-    // they were last set (see hires.h), so setting it once per row here
-    // guarantees it's in effect wherever on that row a sprite later sits.
-    {
-        uint8_t y;
-        for (y = 0; y < HIRES_ROWS; y++)
-            hires_row_colors(y, A_FWWHITE, A_BGBLACK);
-    }
+    // Draws the sky + creek background AND establishes a known white-ink
+    // baseline for every row (varying only PAPER by band) -- sections that
+    // colour their own sprites (see section_bird.c's HxsprColor use) rely
+    // on ink being fixed/predictable to restore to, since ink/paper
+    // attributes cascade rightward from wherever they were last set (see
+    // hires.h). Must run before section_bird_run() draws on top of it.
+    section_background_run(&screen);
 
     // The Oric's HIRES buffer only covers 200 of the screen's 224 scanlines;
     // the remaining 24 (a built-in 3-row TEXT footer) show undefined memory

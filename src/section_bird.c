@@ -36,15 +36,20 @@
 #define BIRD_FRAME_SIZE     (BIRD_FRAME_W_BYTES * BIRD_FRAME_H)
 // Vertical position now flies in a sine wave (see bird_y_for_angle() below)
 // instead of walking a fixed row. BASE_Y/AMPLITUDE are chosen to keep the
-// ENTIRE sprite -- body and colour brackets both -- clear of row
-// HIRES_ROWS-1 (199): row 199's last column (39) is $BF3F, the footer's
-// own sticky TEXT-mode trigger byte (see hires_footer_enable() in
-// main.c), and a past bug (see git history) proved writing there
-// corrupts the footer. BASE_Y=90, AMPLITUDE=40 keeps the lowest point's
-// bottom edge at row 193 (90+40+64-1), comfortably clear of 199, and the
-// highest point's top edge at row 50 (90-40), clear of the top of screen.
-#define BIRD_BASE_Y         90u
-#define BIRD_AMPLITUDE      40
+// ENTIRE sprite -- body and colour brackets both -- clear of BOTH hazards:
+//   - row HIRES_ROWS-1 (199): its last column (39) is $BF3F, the footer's
+//     own sticky TEXT-mode trigger byte (see hires_footer_enable() in
+//     main.c) -- a past bug (see git history) proved writing there
+//     corrupts the footer.
+//   - section_background.c's creek band (rows 172+) -- flying UNDER it
+//     is fine data-wise (XOR doesn't care about the PAPER attribute a
+//     pixel byte happens to render with), but flying mostly ABOVE it is
+//     the intended "bird over the creek" composition.
+// BASE_Y=70, AMPLITUDE=35 keeps the lowest point's bottom edge at row 168
+// (70+35+64-1), clear of the creek's row 172 top edge, and the highest
+// point's top edge at row 35 (70-35), clear of the top of screen.
+#define BIRD_BASE_Y         70u
+#define BIRD_AMPLITUDE      35
 #define BIRD_ANGLE_STEP     10u                                                 // tune for wave frequency
 // BIRD_MIN_COL must keep the ENTIRE sprite -- left ink-bracket (col-1) AND
 // the 11-byte body itself (col..col+10) -- clear of columns 0/1, which

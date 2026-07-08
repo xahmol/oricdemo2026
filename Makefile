@@ -85,6 +85,8 @@ CFLAGS = \
 
 MAIN_SRCS = \
   src/main.c            \
+  src/section_background.c \
+  src/section_background.h \
   src/section_bird.c    \
   src/section_bird.h    \
   assets/bird.h         \
@@ -257,6 +259,8 @@ CFLAGS_FLOPPY_DEMO = \
 
 FLOPPY_SRCS = \
   src/main.c               \
+  src/section_background.c \
+  src/section_background.h \
   src/section_bird.c       \
   src/section_bird.h       \
   assets/bird.h            \
