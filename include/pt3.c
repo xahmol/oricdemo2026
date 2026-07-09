@@ -632,18 +632,40 @@ static void pt3_channel_tick(Pt3Channel *chan, uint16_t *out_tone, uint8_t *out_
     if (note_val > 95) note_val = 95;
 
     sam_data = pt3_word_le((uint16_t)(PT3_OFF_SAMPLES + (uint16_t)chan->sample_num * 2));
-    sam_loop = pt3_byte(sam_data);
-    sam_len = pt3_byte((uint16_t)(sam_data + 1));
-    sam_step = (uint8_t)chan->sample_pos;
+    if (sam_data == 0)
     {
-        uint16_t step_off = (uint16_t)(sam_data + 2 + (uint16_t)sam_step * 4);
-        sam_flags = pt3_byte(step_off);
-        sam_mixflags = pt3_byte((uint16_t)(step_off + 1));
-        sam_delta = (int16_t)pt3_word_le((uint16_t)(step_off + 2));
+        // sam_data==0 means chan->sample_num selected an UNDEFINED slot in
+        // the sample-pointer table (offset 0 is always the PT3 file's own
+        // header, never a real sample -- see project memory
+        // project_pt3_sample_select_bug for the investigation that found
+        // this: an as-yet-unidentified upstream stream-decode bug lands a
+        // channel on sample_num=30 in the real Oxygene4.pt3 module, which
+        // has no sample defined there). Reading step data from byte 0
+        // decodes the header as if it were amplitude/mixflags/delta
+        // bytes, producing huge nonsense tone-period swings that clamp at
+        // the AY's 0/4095 extremes -- audible as unpitched noise instead
+        // of the tune's actual melody. Silencing the channel for this
+        // tick is a pragmatic mitigation, not a root-cause fix: better to
+        // drop a note than to play garbage.
+        sam_flags = 0;
+        sam_mixflags = 0;
+        sam_delta = 0;
     }
+    else
     {
-        uint8_t next = (uint8_t)(sam_step + 1);
-        chan->sample_pos = (next >= sam_len) ? sam_loop : next;
+        sam_loop = pt3_byte(sam_data);
+        sam_len = pt3_byte((uint16_t)(sam_data + 1));
+        sam_step = (uint8_t)chan->sample_pos;
+        {
+            uint16_t step_off = (uint16_t)(sam_data + 2 + (uint16_t)sam_step * 4);
+            sam_flags = pt3_byte(step_off);
+            sam_mixflags = pt3_byte((uint16_t)(step_off + 1));
+            sam_delta = (int16_t)pt3_word_le((uint16_t)(step_off + 2));
+        }
+        {
+            uint8_t next = (uint8_t)(sam_step + 1);
+            chan->sample_pos = (next >= sam_len) ? sam_loop : next;
+        }
     }
 
     new_acc = (int16_t)(chan->tone_acc + sam_delta);
