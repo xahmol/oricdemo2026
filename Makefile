@@ -370,13 +370,30 @@ build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_
 # oric_floppybuilder.py to also emit a Make-include fragment).
 FLOPPY_DEMO_REAL_TRACK  = $(shell grep FloppyFileStartTrack  build/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
 FLOPPY_DEMO_REAL_SECTOR = $(shell grep FloppyFileStartSector build/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
-FLOPPY_DEMO_REAL_SIZE   = $(shell grep FloppyFileSize        build/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
 
-build/floppy_loader.bin: build/floppy_directory.h $(FLOPPY_LOADER_SRCS)
+# The demo's REAL compiled size, read directly off build/floppy_demo.bin
+# itself -- NOT floppy_directory.h's FloppyFileSize (which is derived from
+# build/floppy_demo_pass1.bin, the PLACEHOLDER-header compile). The
+# Makefile's own "two-pass build" design comment above assumes pass1 and
+# the final demo compile to the SAME size ("only the embedded table VALUES
+# differ, not the array shapes") -- that assumption is NOT reliably true
+# (Oscar64 can and does emit a different-sized binary for the two passes;
+# confirmed empirically, a real, previously-undiscovered bug: the gap was
+# 8 bytes before this fix, silently landing in trailing padding, but grew
+# to 56 bytes with an unrelated pt3.c change, landing squarely in
+# pt3_tick()'s own `bitshift` lookup table -- LoadData's compile-time
+# DEMO_SIZE then stopped 56 bytes short of the disk's actual demo data,
+# permanently truncating `bitshift`'s tail to whatever RAM garbage was
+# already there. This is what caused a confusing, extensively-investigated
+# floppy-only PT3 mixer-register regression -- see project memory
+# project_pt3_sample_select_bug for the full trace). Reading the real
+# file's own size makes this correct regardless of whether/how much the
+# two passes' sizes ever drift apart.
+build/floppy_loader.bin: build/floppy_directory.h build/floppy_demo.bin $(FLOPPY_LOADER_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_RT) -rt=include/crt_math.c \
 	    -dDEMO_TRACK=$(FLOPPY_DEMO_REAL_TRACK) \
 	    -dDEMO_SECTOR=$(FLOPPY_DEMO_REAL_SECTOR) \
-	    -dDEMO_SIZE=$(FLOPPY_DEMO_REAL_SIZE) \
+	    -dDEMO_SIZE=$(shell wc -c < build/floppy_demo.bin | tr -d ' ') \
 	    -dLOADER_ADDRESS=$(FLOPPY_LOADER_ADDRESS) \
 	    -dDEMO_ADDRESS=$(FLOPPY_DEMO_ENTRY_ADDRESS) \
 	    -o=build/floppy_loader.bin tools/floppy/loader.c
@@ -482,13 +499,15 @@ build/floppytest/floppy_directory.h: build/floppytest_loader_placeholder.bin bui
 
 FLOPPYTEST_DEMO_REAL_TRACK  = $(shell grep FloppyFileStartTrack  build/floppytest/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
 FLOPPYTEST_DEMO_REAL_SECTOR = $(shell grep FloppyFileStartSector build/floppytest/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
-FLOPPYTEST_DEMO_REAL_SIZE   = $(shell grep FloppyFileSize        build/floppytest/floppy_directory.h | sed -n 's/.*{ *\([0-9]*\).*/\1/p')
 
-build/floppytest_loader.bin: build/floppytest/floppy_directory.h $(FLOPPY_LOADER_SRCS)
+# See build/floppy_loader.bin's own comment above (identical rationale,
+# same bug class, its own regression fixture pipeline) -- real file size,
+# not the pass1-derived FloppyFileSize.
+build/floppytest_loader.bin: build/floppytest/floppy_directory.h build/floppytest_demo.bin $(FLOPPY_LOADER_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_RT) -rt=include/crt_math.c \
 	    -dDEMO_TRACK=$(FLOPPYTEST_DEMO_REAL_TRACK) \
 	    -dDEMO_SECTOR=$(FLOPPYTEST_DEMO_REAL_SECTOR) \
-	    -dDEMO_SIZE=$(FLOPPYTEST_DEMO_REAL_SIZE) \
+	    -dDEMO_SIZE=$(shell wc -c < build/floppytest_demo.bin | tr -d ' ') \
 	    -dLOADER_ADDRESS=$(FLOPPY_LOADER_ADDRESS) \
 	    -dDEMO_ADDRESS=$(FLOPPY_DEMO_ENTRY_ADDRESS) \
 	    -o=build/floppytest_loader.bin tools/floppy/loader.c

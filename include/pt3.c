@@ -364,12 +364,18 @@ static bool pt3_decode_command(Pt3Channel *chan)
     }
 
     if (cmd <= 0x1F)
-    { // envelope shape (0-15) + sample select
+    { // envelope shape (0-15) + sample select -- shape==0 (cmd==0x10)
+      // means NO envelope period follows (matches ppt3.s's PD_ESAM, which
+      // branches around SETENV entirely when z80_A==0); shape!=0 reads a
+      // 16-bit period from the next 2 stream bytes first.
         uint8_t shape = (uint8_t)(cmd - 0x10);
-        pt3_env_shape = shape;
-        pt3_env_period = pt3_word_le(chan->stream_pos);
-        chan->stream_pos = (uint16_t)(chan->stream_pos + 2);
-        chan->env_enabled = true;
+        chan->env_enabled = (shape != 0);
+        if (shape != 0)
+        {
+            pt3_env_shape = shape;
+            pt3_env_period = pt3_word_le(chan->stream_pos);
+            chan->stream_pos = (uint16_t)(chan->stream_pos + 2);
+        }
         chan->sample_num = pt3_byte(chan->stream_pos);
         chan->stream_pos = (uint16_t)(chan->stream_pos + 1);
         chan->sample_pos = 0;
@@ -384,11 +390,18 @@ static bool pt3_decode_command(Pt3Channel *chan)
     }
 
     if (cmd <= 0x4F)
-    { // ornament select (0-15)
+    { // ornament select (0-15) -- ppt3.s's PD_ORN is just `jsr SETORN` with
+      // no stream byte read at all (confirmed against the reference: SETORN
+      // only touches z80_A/the ornament-pointer table, never z80_C). This
+      // used to also read a "sample_num" byte here, which doesn't exist in
+      // the stream for this command -- a real, confirmed bug: it consumed
+      // the NEXT command's own opening byte as if it were a sample index,
+      // permanently misaligning every subsequent byte in the row (and
+      // beyond). This is the actual root cause of the sample_num=30/177/
+      // etc. garbage documented in project memory
+      // project_pt3_sample_select_bug -- not an undefined-sample-table
+      // issue at all, a stream-misalignment bug here.
         pt3_set_ornament(chan, (uint8_t)(cmd - 0x40));
-        chan->sample_num = pt3_byte(chan->stream_pos);
-        chan->stream_pos = (uint16_t)(chan->stream_pos + 1);
-        chan->sample_pos = 0;
         return false;
     }
 
@@ -456,7 +469,11 @@ static bool pt3_decode_command(Pt3Channel *chan)
     }
 
     if (cmd <= 0xBF)
-    { // sample select (1-15) + envelope-off, or (0xB1) row-hold count
+    { // (0xB1) row-hold count, or (0xB2-0xBF) envelope select (shape + 16-bit period).
+      // Traced against ppt3.s's PD_SorE/PD_ENV/SETENV -- this range is NOT
+      // "sample select" (val-1 was previously read as sample_num, and
+      // crucially never consumed the 2 period bytes that really follow,
+      // misaligning the rest of the stream from that point on).
         uint8_t val = (uint8_t)(cmd - 0xB0);
         if (val == 1)
         {
@@ -465,9 +482,10 @@ static bool pt3_decode_command(Pt3Channel *chan)
         }
         else
         {
-            chan->env_enabled = false;
-            chan->sample_num = (uint8_t)(val - 1);
-            chan->sample_pos = 0;
+            pt3_env_shape = (uint8_t)(val - 1);
+            pt3_env_period = pt3_word_le(chan->stream_pos);
+            chan->stream_pos = (uint16_t)(chan->stream_pos + 2);
+            chan->env_enabled = true;
         }
         return false;
     }
