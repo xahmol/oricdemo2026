@@ -49,22 +49,46 @@ int main(void)
 
     hires_on(true);
 
-    // Draws the sky + creek background AND establishes a known white-ink
-    // baseline for every row (varying only PAPER by band) -- sections that
-    // colour their own sprites (see section_bird.c's HxsprColor use) rely
-    // on ink being fixed/predictable to restore to, since ink/paper
-    // attributes cascade rightward from wherever they were last set (see
-    // hires.h). Must run before section_bird_run() draws on top of it.
+    // Draws the sky/bank/river background AND establishes a known
+    // white-ink baseline for every row (varying only PAPER by band) --
+    // sections that colour their own sprites (see section_bird.c's
+    // HxsprColor use) rely on ink being fixed/predictable to restore to,
+    // since ink/paper attributes cascade rightward from wherever they were
+    // last set (see hires.h). Must run before section_bird_run() draws on
+    // top of it.
     section_background_run(&screen);
 
-    // The Oric's HIRES buffer only covers 200 of the screen's 224 scanlines;
-    // the remaining 24 (a built-in 3-row TEXT footer) show undefined memory
-    // unless explicitly enabled and cleared -- see hires_footer_enable()'s
-    // doc comment and docs/hires.md's mode-switch section. Leaving it
-    // disabled (the default) is fine for a test fixture that never draws
-    // near the bottom of the screen, but not for a real demo.
-    hires_footer_enable(true);
-    memset((void *)HIRES_FOOTER, CH_SPACE, (uint16_t)HIRES_FOOTER_ROWS * HIRES_ROW_BYTES);
+    // Deliberately NOT calling hires_footer_enable() here: its 3-row TEXT
+    // footer reads glyph data from $B400/$B800 (see that function's own
+    // doc comment in hires.h for the full story) -- addresses that alias
+    // directly with this demo's own HIRES rows ~128-199 (the creek, and
+    // wherever the bird currently is). Enabling it would render footer
+    // "blank" characters as whatever pixel/attribute bytes are currently
+    // sitting in that part of the picture -- reported as "corruption in
+    // the lower border" running the real demo in Oricutron.
+    //
+    // The bottom 24 scanlines (3 TEXT rows, $BF68-$BFDF) still need
+    // explicit setup though, hires_footer_enable() or not: they render as
+    // TEXT mode UNCONDITIONALLY on real hardware (HIRES bitmap only ever
+    // covers 200 scanlines -- see hires_on()'s own doc comment), so
+    // whatever's sitting there gets interpreted as character codes and
+    // rendered against whatever charset is active (which hires_on()
+    // already made blank). CH_SPACE for the character codes themselves,
+    // plus an explicit white-ink/black-paper attribute pair at the start
+    // of each of the 3 rows (real Oric RAM isn't zero-initialized --
+    // relying on the ULA's per-scanline reset alone isn't robust against
+    // stray attribute bytes already sitting there from power-on).
+    {
+        uint8_t *footer = (uint8_t *)HIRES_FOOTER;
+        uint8_t row;
+        for (row = 0; row < HIRES_FOOTER_ROWS; row++)
+        {
+            uint8_t *p = footer + (uint16_t)row * HIRES_ROW_BYTES;
+            p[0] = A_FWWHITE;
+            p[1] = A_BGBLACK;
+            memset(p + 2, CH_SPACE, HIRES_ROW_BYTES - 2);
+        }
+    }
 
     // Background music, ticking at 50Hz via a raster IRQ (see docs/pt3.md
     // and docs/rasterirq.md) -- decoupled from section_bird_run()'s own
@@ -85,10 +109,12 @@ int main(void)
     section_bird_init(&screen);
 
     // Master loop: each section owns its own state and pacing, called in
-    // turn every tick (see section_bird.h/section_clouds.h). PT3 playback
-    // stays fully decoupled from this, ticking via its own raster IRQ.
+    // turn every tick (see section_bird.h/section_clouds.h/
+    // section_background.h). PT3 playback stays fully decoupled from
+    // this, ticking via its own raster IRQ.
     for (;;)
     {
+        section_background_tick(&screen);
         section_clouds_tick(&screen);
         section_bird_tick(&screen);
     }

@@ -287,6 +287,13 @@ void hb_line(const HiresBitmap *hb, const HiresClip *clip, uint8_t x0, uint8_t y
 
 void hires_on(bool pal50hz)
 {
+    // See this function's own doc comment in hires.h for why. Cheap (1KB),
+    // done unconditionally rather than tracked with a "did this already
+    // run" flag -- simplicity over a micro-optimisation for a function
+    // only ever called once per program in practice.
+    memset((void *)HIRES_CHARSET_STD, 0x00, 0x400);
+    memset((void *)HIRES_CHARSET_ALT, 0x00, 0x400);
+
     uint8_t *p = (uint8_t *)(TEXTVRAM + SCREEN_COLS - 1);
     *p = pal50hz ? A_HIRES_50HZ : A_HIRES_60HZ;
 }

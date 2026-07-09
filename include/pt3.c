@@ -155,14 +155,16 @@ void pt3_init(void)
 {
     uint8_t i;
 
-    // PT3 ticks conventionally at 50Hz. Timer 1 is inherited from ROM boot
-    // at a 100Hz free-run rate (oric.h's TIMER1_100HZ) -- reprogram its
-    // latch to TIMER1_50HZ (writing the latch then re-triggering via a
-    // T1C-H write, per oric.h's "custom timer" note; ACR is already in
-    // free-run mode from ROM boot, no need to touch it) so hrirq_add()'s
-    // callback cadence matches real playback speed. This affects ANY other
-    // hrirq_add() consumer sharing the same timer -- see docs/rasterirq.md
-    // and docs/pt3.md.
+    // PT3 ticks conventionally at 50Hz. Timer 1 free-runs at a 100Hz rate
+    // out of the box on the tape/LOCI target (oric.h's TIMER1_100HZ,
+    // inherited from ROM boot) -- reprogram its latch to TIMER1_50HZ
+    // (writing the latch then re-triggering via a T1C-H write, per oric.h's
+    // "custom timer" note) so hrirq_add()'s callback cadence matches real
+    // playback speed. This affects ANY other hrirq_add() consumer sharing
+    // the same timer -- see docs/rasterirq.md and docs/pt3.md.
+    // (ACR continuous-mode/IER-enable setup itself now lives in
+    // rasterirq.c's hrirq_init(), not here -- see that function's own
+    // comment for why it can no longer assume ROM already did this.)
     VIA.t1llo = (uint8_t)(TIMER1_50HZ & 0xFF);
     VIA.t1lhi = (uint8_t)(TIMER1_50HZ >> 8);
     VIA.t1hi  = (uint8_t)(TIMER1_50HZ >> 8);
@@ -428,6 +430,21 @@ static bool pt3_decode_command(Pt3Channel *chan)
             chan->slide_active = false;
             chan->tone_slide = 0;
         }
+        // A freshly struck note (portamento or plain) also resets the
+        // sample-driven tone accumulator: tone_acc represents a per-note
+        // sample effect (e.g. a controlled pitch creep across the current
+        // sample's own steps), not a whole-song cumulative drift. Without
+        // this reset, tone_acc (see pt3_channel_tick()'s "accumulate"
+        // flag handling) keeps adding sam_delta on every tick a sample
+        // with that flag set is active, for the ENTIRE rest of the song --
+        // a real bug found by capturing actual AY register output over
+        // hundreds of ticks (not just the first one or two, which the
+        // regression tests cover): tone periods drifted monotonically
+        // until clamped at the 12-bit range's 0/4095 extremes and got
+        // stuck there, which is exactly what real hardware/Oricutron
+        // played back as unpitched noise instead of the tune's actual
+        // melody (not reproduced by only checking a handful of ticks).
+        chan->tone_acc = 0;
         chan->enabled = true;
         return true;
     }

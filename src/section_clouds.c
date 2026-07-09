@@ -6,11 +6,29 @@
 // section_bird.c's own horizontal movement (bird moves every tick, clouds
 // scroll every CLOUD_SCROLL_EVERY ticks: two independent speeds/depths).
 //
-// Deliberately kept within rows 14-41: confirmed clear of the row range
+// Deliberately kept within rows 14-33: confirmed clear of the row range
 // that triggers the footer-interaction rendering bug documented in project
 // memory (project_phosphoric_footer_color_bug) -- that bug only reproduced
 // with pixel content near the creek/footer end of the screen (row ~170+),
 // not here. Don't move this band down near the creek without re-testing.
+//
+// ALSO deliberately kept clear of section_bird.c's own row range (bird's
+// sprite reaches as high as row 35 at the top of its sine wave -- see that
+// file's BIRD_BASE_Y/BIRD_AMPLITUDE comment) with a 1-row margin. This
+// matters for a reason beyond simple visual overlap: this layer's own
+// scroll can run BETWEEN a bird XOR draw and its later XOR erase (main.c's
+// loop calls section_clouds_tick() then section_bird_tick() every
+// iteration, and bird_tick() only re-erases the PREVIOUS frame's position
+// on its NEXT call) -- if a cloud-scroll shifted bytes under a
+// currently-drawn bird, the bird's later erase XORs its shape onto
+// ALREADY-CHANGED data instead of the exact bytes it drew onto, leaving
+// permanent stray pixel garbage (this exact bug was reported as "yellow
+// corruption below clouds" running in real Oricutron -- not reproduced in
+// this project's own Phosphoric testing, which never happened to catch
+// the bird at a row low enough to overlap the old, taller cloud band).
+// Keeping the two sections' row ranges disjoint sidesteps the whole
+// problem rather than trying to synchronise scroll timing against
+// whatever sprite happens to be mid-draw.
 //
 // Clouds are simple 3-ellipse silhouettes (hb_ellipse_fill), ink-coloured
 // (white, matching the whole screen's fixed ink baseline -- see
@@ -38,7 +56,7 @@
 #include "section_clouds.h"
 
 #define CLOUD_TOP           14u
-#define CLOUD_ROWS          28u
+#define CLOUD_ROWS          20u
 #define CLOUD_SCROLL_EVERY  6u    // main-loop ticks between each 6px scroll step
 #define CLOUD_SPAWN_EVERY   10u   // scroll steps between a fresh cloud spawning at the right edge
 #define CLOUD_MIN_X         25u   // keeps the widest ellipse's leftmost edge (x-10) at column-byte >=2
@@ -68,9 +86,9 @@ void section_clouds_init(const HiresBitmap *screen)
 {
     hb_init(&cloud_canvas, screen->data + (uint16_t)CLOUD_TOP * HIRES_ROW_BYTES, CLOUD_ROWS);
 
-    draw_cloud(CLOUD_MIN_X, 14);
-    draw_cloud(110, 18);
-    draw_cloud(190, 10);
+    draw_cloud(CLOUD_MIN_X, 10);
+    draw_cloud(110, 13);
+    draw_cloud(190, 8);
 }
 
 void section_clouds_tick(const HiresBitmap *screen)

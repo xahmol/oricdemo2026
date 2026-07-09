@@ -14,9 +14,11 @@
 // byte-aligned, same granularity the reference's own direct-poke approach
 // uses, for the same reason.
 //
-// Coloured yellow via HxsprColor's ink-only bracket: assumes main.c has
-// established a white-ink/black-paper baseline for the whole screen (see
-// main.c and docs/sprite.md's "Colour" section) -- the bracket's
+// Coloured black via HxsprColor's ink-only bracket (silhouette-style,
+// readable against the sky's cyan/the creek's blue paper -- yellow was
+// tried first but was hard to see against cyan): assumes main.c/
+// section_background.c have established a white-ink baseline for the
+// whole screen (see docs/sprite.md's "Colour" section) -- the bracket's
 // restore_ink (A_FWWHITE) only makes sense against that known baseline.
 // This costs 2 extra column-bytes (one each side of the 11-byte image),
 // hence BIRD_FRAME_W_BYTES=11 but BIRD_MIN_COL/MAX_COL leave col-1/col+11
@@ -74,7 +76,7 @@ static uint8_t bird_y_for_angle(uint8_t angle)
     return (uint8_t)(BIRD_BASE_Y + offset);
 }
 
-static const HxsprColor bird_color = { true, A_FWYELLOW, A_FWWHITE };
+static const HxsprColor bird_color = { true, A_FWBLACK, A_FWWHITE };
 
 // Busy-wait delay between animation ticks. Uses a genuine volatile memory
 // write each iteration, not just a volatile loop counter -- Oscar64's

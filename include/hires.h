@@ -121,6 +121,27 @@ void hb_line(const HiresBitmap *hb, const HiresClip *clip, uint8_t x0, uint8_t y
 // of TEXT row 0. Caller should hb_fill()/draw the HIRES canvas beforehand
 // (real RAM is not zero-initialized -- see hb_fill()). pal50hz: true for
 // PAL Oric Atmos (Europe, the common case), false for NTSC.
+//
+// Also blanks the HIRES-mode charset banks ($9800-$9FFF -- see oric.h's
+// HIRES_CHARSET_STD/ALT). This matters even if the caller never draws
+// text: the Oric's bottom 24 scanlines (3 TEXT rows, $BF68-$BFDF) are
+// UNCONDITIONALLY rendered as TEXT mode regardless of hires_footer_enable()
+// -- HIRES bitmap only ever covers 200 scanlines, so those last 24 have no
+// HIRES rendering path at all on real hardware. Whatever's currently in
+// $BF68-$BFDF gets interpreted as character codes against whichever
+// charset bank is "active" for TEXT-mode lookups -- which, once HIRES mode
+// has ever been entered, is $9800/$9C00 (not the ordinary TEXT-mode
+// $B400/$B800), since nothing else in this codebase changes that back.
+// Nothing else in this codebase ever populates $9800/$9C00 with real
+// glyph bitmaps (no HIRES-mode caller has needed anything beyond blank),
+// and real Oric RAM is NOT zero-initialized at power-on (same fact
+// hb_fill() warns about) -- without this, that bottom border renders
+// whatever undefined bytes happen to be there as visible noise, seen as
+// a solid white bar running the real demo in Oricutron (Phosphoric
+// apparently zero-fills RAM more favourably, masking this). Caller still
+// needs to fill $BF68-$BFDF itself with a blank character code (e.g.
+// CH_SPACE) -- see hires_footer_enable()'s own doc comment for the
+// separate, unrelated caveat about that function specifically.
 void hires_on(bool pal50hz);
 
 // Clear the sticky HIRES-entry trigger, reverting fully to a normal 28-row
@@ -132,6 +153,30 @@ void hires_off(void);
 // TEXT geometry) at the bottom of a HIRES screen, without leaving HIRES
 // mode for rows 0-199 above it. Costs the last byte of the HIRES bitmap
 // ($BF3F) -- it can no longer hold pixel data while the footer is enabled.
+//
+// IMPORTANT CAVEAT, confirmed against Oricutron's own ULA source
+// (ula.c's ula_decode_attr(), case 0x18): switching a scanline to TEXT
+// mode via the serial video-mode attribute ALSO switches the glyph-lookup
+// charset base back to the STANDARD TEXT location ($B400 for the
+// standard set, $B800 for the alternate) -- NOT the HIRES-mode-relocated
+// $9800/$9C00 banks, despite oric_atmos_reference.md's "character sets
+// move to $9800/$9C00 when HIRES active" framing (true only for scanlines
+// actively rendering HIRES pixels, not for TEXT-mode scanlines that
+// happen to occur while overall still "in HIRES mode" -- the footer is
+// the latter). $B400-$BBFF is itself INSIDE the live HIRES bitmap's own
+// address range (HIRESVRAM+128*40 through +204*40 -- roughly HIRES rows
+// 128-199) -- so glyph data for the footer's characters is read from
+// whatever pixel/attribute bytes your own HIRES drawing has left in that
+// portion of the screen. This is a real, unavoidable hardware aliasing,
+// not a missing-initialization bug (confirmed: blanking $9800/$9C00, the
+// wrong bank, does nothing; there is no way to give $B400-$BBFF stable
+// "glyph" content without it also being live bitmap content, short of
+// never drawing anything in HIRES rows 128-199). Caller must either
+// avoid drawing in that row range entirely, or accept that footer
+// characters will show transient noise reflecting whatever's currently
+// drawn there. See project memory for the investigation that found this
+// (reported as "corruption in the lower border" running the real demo in
+// Oricutron, not reproduced in Phosphoric).
 void hires_footer_enable(bool pal50hz);
 
 // Disable the footer, restoring the last HIRES byte to ordinary (blank)

@@ -438,10 +438,24 @@ sit_forever:
 // irq_bridge: the $FFFE/$FFFF target -- forwards the real hardware IRQ to
 // whatever include/rasterirq.c's hrirq_init() has (or hasn't yet) set at
 // $0245/$0246. See file header's "IRQ vector bridge" section.
+//
+// MUST use parentheses, not square brackets: Oscar64's inline-asm syntax
+// for a true 6502 indirect JMP (opcode $6C, "jump to the address stored
+// AT $0245/$0246") is `jmp (addr)` (see oscar64manual.md's own example) --
+// `jmp [addr]` silently assembled as something else entirely (empirically,
+// NOT an indirect jump: real-hardware-accurate testing under Oricutron
+// showed the CPU executing raw bytes starting at/near $0245 as if they
+// were code, landing on an illegal JAM opcode within 3 bytes -- i.e., a
+// hard crash the instant the first Timer 1 IRQ fired). This is the same
+// class of gotcha as this file's own "ZERO-PAGE GOTCHA" note on (ptr),Y
+// addressing -- a silently-misassembled addressing mode, no compiler
+// error or warning. Only affects this floppy target: the tape/LOCI
+// target's oric_crt_hires.c doesn't route interrupts through a bridge
+// like this at all.
 // -----------------------------------------------------------------------
 __asm irq_bridge
 {
-    jmp [ORIC_IRQ_VECTOR_LO]
+    jmp (ORIC_IRQ_VECTOR_LO)
 }
 
 // -----------------------------------------------------------------------
