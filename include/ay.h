@@ -19,7 +19,7 @@
 // VIA/PCR sequence with PHP/SEI/PLP (matching include/ijk.c's convention,
 // not a bare SEI/CLI) so this cannot interleave with include/keyboard.c's
 // own AY access, and so it stays safe to call from an __interrupt context
-// (see include/pt3.h) where interrupts are already disabled by the calling
+// (see include/arkos.h) where interrupts are already disabled by the calling
 // __hwinterrupt handler -- PHP/PLP preserves whatever the interrupt flag
 // already was rather than assuming it.
 void ay_write(uint8_t reg, uint8_t value);

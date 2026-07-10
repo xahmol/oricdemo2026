@@ -1,7 +1,7 @@
 # AY-3-8912 register-write helper (ay.h)
 
 A single, correct implementation of the Oric's AY-3-8912 sound chip write
-protocol — used by [pt3.h](pt3.md), and the intended replacement for any
+protocol — used by [arkos.h](arkos.md), and the intended replacement for any
 future code that would otherwise hand-roll this sequence itself. Include
 `ay.h`; it auto-compiles `ay.c` via `#pragma compile`.
 
@@ -10,7 +10,7 @@ void ay_write(uint8_t reg, uint8_t value);
 ```
 
 Selects AY register `reg` and writes `value` to it. Safe to call from
-normal code or from a `pt3_tick()`-style `__interrupt` context.
+normal code or from an `arkos_tick()`-style `__interrupt` context.
 
 ## The protocol, and a real correction this project shipped with
 
@@ -21,8 +21,10 @@ project, now fixed. The real protocol drives BC1/BDIR through **VIA PCR**
 (`$030C`), confirmed correct by two independent, mutually-agreeing sources:
 this project's own already-working `include/keyboard.c` (which selects AY
 register 14 for keyboard column drive using exactly this sequence), and
-6502Nerd/dflat's PT3 player (`ppt3.s`'s `ROUT` routine, see [pt3.md](pt3.md)
-for the full attribution).
+6502Nerd/dflat's PT3 player (`ppt3.s`'s `ROUT` routine -- an earlier PT3
+music player used by this project confirmed the same protocol before being
+replaced by [arkos.h](arkos.md); see the `pt3` branch's own `ARCHIVE_NOTE.md`
+for that player's own attribution).
 
 Write sequence for AY register `N` = value `V` (`VIA_ORA` = `VIA.pra2` =
 `$030F`, the no-handshake Port A; `VIA_PCR` = `VIA.pcr` = `$030C`):
@@ -56,6 +58,6 @@ Phosphoric's `--dump-ram-at` dumps RAM only, not memory-mapped I/O — reading
 back `$030F`/`$030C` after a real `ay_write()` call returns flat `0x00`
 regardless of what was written (confirmed empirically). `ay_write()` itself
 is therefore only smoke-tested (compiles, links, doesn't crash) by this
-project's own test suite; [pt3.md](pt3.md) verifies the *computation* that
-feeds into `ay_write()` calls via a separate register-value shadow array,
-which is a real, byte-exact, RAM-dumpable proxy for correctness.
+project's own test suite; [arkos.md](arkos.md) verifies the *computation*
+that feeds into `ay_write()` calls via a separate register-value shadow
+array, which is a real, byte-exact, RAM-dumpable proxy for correctness.

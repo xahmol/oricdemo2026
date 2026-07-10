@@ -20,14 +20,16 @@
 //             loaded via floppy_load(), only via the boot sector+loader)
 //   index 1 = a small raw test payload, used to exercise floppy_load()
 //             directly (see PAYLOAD_TEST_SIZE below)
-//   index 2 = tests/fixtures/music.pt3, exercised via pt3_load()'s
-//             STORAGE_FLOPPY (compile-time index) overload
+//   index 2 = tests/fixtures/arkos_test.aky, exercised via arkos_load()'s
+//             STORAGE_FLOPPY (compile-time index) overload -- used to test
+//             tests/fixtures/music.pt3 via pt3_load() instead, before PT3
+//             was replaced by Arkos (see docs/arkos.md)
 
 #include "oric.h"
 #include "charwin.h"
 #include "keyboard.h"
 #include "floppy.h"
-#include "pt3.h"
+#include "arkos.h"
 
 // Must match whatever tests/scripts/test_disk.sh's FloppyBuilder script
 // places at file index 1 -- see that script for the actual bytes.
@@ -53,23 +55,26 @@ int main(void)
     else
         cwin_putat_printf(&scr, 0, 6, "floppy_load: FAILED (r=%d)", r);
 
-    // PT3 player smoke test via the floppy backend -- same fixture and
-    // same assertion shape as src/main.c's own LOCI-backed test (see that
-    // file's comment for what tests/fixtures/music.pt3 actually contains),
-    // just loaded by compile-time file index instead of a path string.
-    if (pt3_load(2))
+    // Arkos player smoke test via the floppy backend -- same fixture and
+    // same assertion shape as src/buildtest.c's own LOCI-backed test (see
+    // that file's comment for what tests/fixtures/arkos_test.aky actually
+    // contains), just loaded by compile-time file index instead of a path
+    // string. This target has no overlay-RAM concept at all (see
+    // docs/floppy.md/docs/arkos.md) -- arkos_load() here is a plain load
+    // straight into $C000, no enable_overlay_ram() step.
+    if (arkos_load(2))
     {
         const uint8_t *shadow;
         uint8_t i;
-        pt3_init();
-        pt3_tick();
-        shadow = pt3_debug_shadow();
-        cwin_putat_string(&scr, 0, 8, "PT3 tune loaded, AY regs:");
+        arkos_init();
+        arkos_tick();
+        shadow = arkos_debug_shadow();
+        cwin_putat_string(&scr, 0, 8, "Arkos tune loaded, AY regs:");
         for (i = 0; i < 14; i++)
             cwin_putat_printf(&scr, (uint8_t)(i * 3), 9, "%02x", shadow[i]);
     }
     else
-        cwin_putat_string(&scr, 0, 8, "PT3: no tune loaded");
+        cwin_putat_string(&scr, 0, 8, "Arkos: no tune loaded");
 
     cwin_putat_string(&scr, 0, 11, "Press any key to exit");
     keyb_getch();

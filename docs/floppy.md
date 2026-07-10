@@ -57,7 +57,7 @@ content, analogous to each other):
 | Storage backend | `include/loci.c` (needs a LOCI device, for the music file only) | `include/floppy.c` (needs nothing but the disk itself) |
 | Runs in plain Oricutron | Yes (no longer needs LOCI for graphics) | Yes |
 | File addressing | Runtime path string | Compile-time integer index |
-| `pt3_load()` signature | `bool pt3_load(const char *path)` | `bool pt3_load(uint8_t file_index)` (`STORAGE_FLOPPY`) |
+| `arkos_load()` signature | `bool arkos_load(const char *path)` | `bool arkos_load(uint8_t file_index)` (`STORAGE_FLOPPY`) |
 | Regression fixture | `src/buildtest.c` (`make test`, default `oric_crt.c` runtime) | `src/floppy_test.c` (`make test-disk`, default `oric_crt_floppy.c` runtime, own separate `build/floppytest.dsk`) |
 
 `include/oric_crt_floppy_hires.c` merges `oric_crt_hires.c`'s HIRES memory
@@ -214,13 +214,13 @@ embedded into the disk image by `tools/oric_floppybuilder.py`; `floppy.c` is
 linked into the demo binary), so nothing enforces this agreement except both
 files' own comments.
 
-### `pt3_load()`'s split signature — real and intentional
+### `arkos_load()`'s split signature — real and intentional
 
 ```c
 #ifdef STORAGE_FLOPPY
-bool pt3_load(uint8_t file_index);   // floppy target
+bool arkos_load(uint8_t file_index);   // floppy target
 #else
-bool pt3_load(const char *path);     // tape/LOCI target
+bool arkos_load(const char *path);     // tape/LOCI target
 #endif
 ```
 
@@ -228,10 +228,10 @@ Floppy files are addressed by a compile-time integer index (there's no
 runtime directory to search — only a fixed file table baked into the disk
 image at build time), not a runtime path string. Unifying the signature
 across targets would be dishonest about this real difference. Call sites:
-`pt3_load(LOADER_MUSIC_FILE)` on floppy vs. `pt3_load("music.pt3")` on
-tape/LOCI.
+`arkos_load(LOADER_MUSIC_FILE)` on floppy vs. `arkos_load("steppingout.aky")`
+on tape/LOCI.
 
-### The IRQ-vector bridge (why `rasterirq.c`/`pt3.c` work unmodified here)
+### The IRQ-vector bridge (why `rasterirq.c`/`arkos.c` work unmodified here)
 
 `rasterirq.c` installs its handler at `$0245`/`$0246` (a RAM cell the *ROM*
 conventionally jumps through), not the real 6502 IRQ vector. With ROM
@@ -239,7 +239,7 @@ permanently gone on the floppy target, `$FFFE`/`$FFFF` are real RAM — and
 exactly where the resident loader's own code lives. Fix: the loader's
 one-shot init sets `$0245`/`$0246` to a safe RTI stub and `$FFFE`/`$FFFF` to
 `JMP ($0245)` — an indirect jump through the same low-RAM cell `rasterirq.c`
-already expects. This makes `hrirq_init()`/`pt3_tick()` work **unmodified**
+already expects. This makes `hrirq_init()`/`arkos_tick()` work **unmodified**
 on the floppy target.
 
 ### Implementation approach: Oscar64-compiled, not hand-assembled xa65
@@ -308,18 +308,18 @@ structure: boots `build/floppytest.dsk` (`src/floppy_test.c`'s own
 regression build, NOT the real demo's `build/oricdemo_floppy.dsk`) under
 Phosphoric's Microdisc emulation (`--disk-rom`, no LOCI/tape at all) and
 asserts `src/floppy_test.c`'s status lines render, including a
-`floppy_load()` payload check and a `pt3_load(file_index)` + one-tick
+`floppy_load()` payload check and an `arkos_load(file_index)` + one-tick
 AY-register-shadow assertion (same spirit as `test_boot.sh`'s own
-`music.pt3` check).
+`arkos_test.aky` check).
 
 **What Phosphoric genuinely cannot verify**: Jasmin (not emulated at all —
 moot, v1 is Microdisc-only); the self-relocating boot sector's behavior
 against real EPROM timing (Phosphoric models the register-level contract,
 not cycle-exact firmware); real floppy-drive mechanics.
 
-**Needs real Oricutron or hardware**: Jasmin once added; audible PT3
+**Needs real Oricutron or hardware**: Jasmin once added; audible Arkos
 playback confirmation (RAM-dump assertions prove decode correctness, not how
-it sounds — same caveat as the tape target, see `docs/pt3.md`); an actual
+it sounds — same caveat as the tape target, see `docs/arkos.md`); an actual
 "does it boot on a real Atmos + Microdisc" hardware test.
 
 ## What's precisely traced vs. adapted/simplified
@@ -411,9 +411,10 @@ worth knowing if this code is touched again:
   `l_bytes_lo`-zeroing path from the wrong branch) — see
   `tools/floppy/loader.c`'s `sector_ok` comment for the full trace. Now
   correctly reads the same value on both targets (`0x3C` at the time this
-  bug was fixed; later `0x24` once a separate, unrelated `pt3.c` mixer-bit
-  bug was fixed too -- see `docs/pt3.md`'s Verification section);
-  `tests/scripts/test_disk.sh` asserts the current corrected value.
+  bug was fixed; later `0x24` once a separate, unrelated PT3 mixer-bit
+  bug was fixed too -- PT3 has since been replaced by Arkos, see
+  `docs/arkos.md`); `tests/scripts/test_disk.sh` now asserts against
+  `arkos_test.aky` instead (see the Testing section above).
 - **`tools/floppy/loader.c`'s boot handoff must jump to the runtime's
   `startup` region (`$0500`), not straight into `main()` (`$0580`).** The
   Makefile must pass `-dDEMO_ADDRESS=0x0500` to every `loader.c` compile —

@@ -59,6 +59,6 @@ AddDefine LOADER_DEMO_FILE {FileIndex}
 AddFile {PAYLOAD_BIN}
 AddDefine LOADER_PAYLOAD_FILE {FileIndex}
 
-; File index 2: src/floppy_test.c's pt3_load() smoke test (STORAGE_FLOPPY).
+; File index 2: src/floppy_test.c's arkos_load() smoke test (STORAGE_FLOPPY).
 AddFile {MUSIC_BIN}
 AddDefine LOADER_MUSIC_FILE {FileIndex}

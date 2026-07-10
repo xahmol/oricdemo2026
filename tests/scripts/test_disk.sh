@@ -23,10 +23,10 @@ SCREEN=tests/scripts/oric_screen.py
 
 # Calibrated cycle count -- long enough for the boot sector to relocate
 # itself, the resident loader to read and jump to the demo binary, and
-# main() to run past charwin_init()/floppy_load()/pt3_load() and draw every
-# status line (see src/floppy_test.c). Verified stable well past this point
-# too (PC settles into keyb_getch()'s own poll loop, correctly waiting for
-# a key that never comes in headless mode).
+# main() to run past charwin_init()/floppy_load()/arkos_load() and draw
+# every status line (see src/floppy_test.c). Verified stable well past this
+# point too (PC settles into keyb_getch()'s own poll loop, correctly
+# waiting for a key that never comes in headless mode).
 BOOT_CYCLES=25000000
 
 BOOT_DUMP="$OUT/capture_disk.bin"
@@ -81,27 +81,17 @@ else
     # bytes into whatever memory followed it (see loader.c's fetch_byte
     # comment and docs/floppy.md).
     check_found "floppy_load payload OK"    "floppy_load: payload OK"        "$BOOT_DUMP"
-    # PT3 smoke test via the STORAGE_FLOPPY pt3_load(uint8_t file_index)
-    # overload (tests/fixtures/music.pt3, file index 2, same fixture as
-    # test_boot.sh's own LOCI-backed check) -- pt3_init()+one pt3_tick()
-    # computes these AY register values.
-    check_found "PT3 tune loaded"           "PT3 tune loaded, AY regs:"      "$BOOT_DUMP"
-    # Was 3F here (vs. test_boot.sh's 3C for the byte-identical tape/LOCI
-    # run) until tools/floppy/loader.c's LoadData byte-count bug was fixed
-    # (see that file's own comment) -- the module's tail sat in the final,
-    # non-256-aligned partial sector, which the buggy decrement logic
-    # silently never loaded, corrupting the mixer byte specifically. Now
-    # correctly matches the tape/LOCI target on both platforms -- and both
-    # were updated again, 3C -> 24, when the tone/noise mixer-enable bits
-    # were fixed to come from the current sample step's own flags byte
-    # every tick instead of a permanent per-channel latch, and 0A -> 0B
-    # (byte 9, channel B's volume) when the linear volume/amplitude
-    # combine was replaced with the real PT3_VOLUME_TABLE -- and the
-    # fixture itself (sample 0 step 0) was later patched to swap its
-    # flags/mixflags bytes when a further fix moved the amplitude-nibble
-    # read from the first sample-step byte to the second (see
-    # test_boot.sh's own comment on this exact same fixture for the story).
-    check_found "PT3 AY registers"          "79 07 BD 03 00 00 00 24 0F 0B 00 00 00" "$BOOT_DUMP"
+    # Arkos smoke test via the STORAGE_FLOPPY arkos_load(uint8_t file_index)
+    # overload (tests/fixtures/arkos_test.aky, file index 2, same fixture as
+    # test_boot.sh's own LOCI-backed check) -- arkos_init()+one arkos_tick()
+    # computes these AY register values. Same expected values as
+    # test_boot.sh's own "Arkos AY registers" tick-1 check (see that file's
+    # comment for the full byte-by-byte trace) -- this target has no
+    # overlay-RAM concept at all, so arkos_load() here is a plain load
+    # straight into $C000 (see docs/floppy.md/docs/arkos.md), and the
+    # module data is byte-identical to the tape/LOCI target's copy.
+    check_found "Arkos tune loaded"         "Arkos tune loaded, AY regs:"    "$BOOT_DUMP"
+    check_found "Arkos AY registers"        "00 00 00 00 00 00 00 1F 40 40 40 00 00" "$BOOT_DUMP"
     check_found "exit prompt renders"       "Press any key to exit"         "$BOOT_DUMP"
 fi
 

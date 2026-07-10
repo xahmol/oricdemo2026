@@ -18,7 +18,16 @@
 //   $A000-$BF3F  HIRES bitmap (HIRESVRAM, 8000 bytes)
 //   $BF40-$BF67  Unused (42 bytes)
 //   $BF68-$BFDF  Built-in 3-line TEXT footer (HIRES_FOOTER)
-//   $C000-$FFFF  ROM (overlay RAM requires LOCI, see oric.h)
+//   $C000-$FFFF  Overlay RAM when enabled (16 KB) -- the Arkos Tracker
+//                (.aky) music buffer (ARKOS_MODULE) lives here at its base,
+//                $C000, toggled in via MICRODISCCFG (oric.h's OVERLAY_ON/
+//                OFF, loci.c's enable_overlay_ram()/disable_overlay_ram());
+//                ROM otherwise. See docs/arkos.md for why $C000 specifically
+//                (matches the fixed export address every .aky file must use,
+//                same "no relocation needed" convention as PT3's own module
+//                buffer used a plain linker-placed address for). This is
+//                genuinely separate memory, not part of the 'main' region
+//                below -- no budget taken from ordinary code/data/bss.
 //
 // $9800-$BFDF is deliberately left uncovered by any #pragma region below --
 // exactly like oric_crt.c leaves TEXTVRAM/screen RAM uncovered today -- so

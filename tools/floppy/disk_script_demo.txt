@@ -37,7 +37,7 @@ SetPosition 0 10
 AddFile {DEMO_BIN}
 AddDefine LOADER_DEMO_FILE {FileIndex}
 
-; File index 1: assets/popcorn.pt3, loaded via pt3_load(1) (STORAGE_FLOPPY)
-; -- see src/main.c's MUSIC_FILE.
+; File index 1: assets/steppingout.aky, loaded via arkos_load(1)
+; (STORAGE_FLOPPY) -- see src/main.c's MUSIC_FILE.
 AddFile {MUSIC_BIN}
 AddDefine LOADER_MUSIC_FILE {FileIndex}

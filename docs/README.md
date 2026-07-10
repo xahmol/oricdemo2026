@@ -27,7 +27,7 @@ documents what's actually present in `include/` here.
 12. [Fade/dissolve transitions (dissolve.h)](dissolve.md)
 13. [Raster IRQ / mid-frame effects (rasterirq.h)](rasterirq.md)
 14. [AY-3-8912 register-write helper (ay.h)](ay.md)
-15. [PT3 music player (pt3.h)](pt3.md)
+15. [Arkos Tracker music player (arkos.h)](arkos.md)
 16. [Image conversion (tools/oric_pictconv.py)](pictconv.md)
 17. [Floppy-disk build target (tools/oric_floppybuilder.py, floppy.h)](floppy.md)
 18. [Build notes](build-notes.md)

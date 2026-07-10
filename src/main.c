@@ -11,46 +11,35 @@
 #include <string.h>
 #include "oric.h"
 #include "hires.h"
-#include "pt3.h"
+#include "arkos.h"
 #include "rasterirq.h"
 #include "section_background.h"
 #include "section_bird.h"
 #include "section_clouds.h"
 
-// Background music: assets/popcorn.pt3, from 6502Nerd/dflat's own
-// tunes/ collection (the same MIT-licensed repo this project's PT3 player
-// itself is ported from -- see docs/pt3.md's Attribution section). A
-// chiptune cover of "Popcorn" (Gershon Kingsley, 1969; popularized by Hot
-// Butter's 1972 synth recording) -- used deliberately, same low-risk-in-
-// practice demoscene convention as the rest of that tunes/ collection
-// (nearly all covers of commercial tracks). Replaces an earlier choice,
-// assets/oxygene4.pt3 (a cover of Jean-Michel Jarre's "Oxygene IV") --
-// swapped out because that file's own bass instrument (sample 9) mixes
-// noise into its loudest attack steps by design, which the user found did
-// not read as a clean bassline once decode correctness was fully verified
-// (see docs/pt3.md's "Three real, confirmed bugs" section's item 3 for
-// the full investigation -- the noise-on-attack was confirmed to be
-// genuine data in that file, not a decode bug, via byte-level inspection
-// and cross-checking against 3 independent PT3 player implementations).
-// This file was pre-screened the same way before adopting it: decoded
-// cleanly for 8000 simulated ticks (~160s) with zero undefined-sample/
-// out-of-range-note errors, and its own sample definitions use noise on
-// only ~22% of steps overall (vs. oxygene4.pt3's bass instrument using it
-// on 3 of its 7 steps, including its 3 loudest).
+// Background music: assets/steppingout.aky ("Mr.Lou - Dewfall Productions -
+// Stepping out (2019)"), an Arkos Tracker module exported to $C000 -- see
+// docs/arkos.md for the full format writeup, why this player replaced the
+// earlier PT3 (Vortex Tracker) one (archived on the `pt3` branch after
+// several rounds of decode-bug fixes still didn't produce satisfying music,
+// and its runtime overhead was judged too high), and why Arkos modules load
+// into overlay/floppy-target RAM at a fixed address rather than this
+// project's own main code/data/BSS budget.
 //
-// pt3_load()'s signature (and this file reference) differs by target --
-// see pt3.h/docs/pt3.md -- not a bug, a real, intentional difference:
-//   - Tape/LOCI target: pt3_load(const char *path), loaded via LOCI at
-//     runtime. Ships alongside build/oricdemo.tap in the USB/zip
-//     distribution (Makefile's usb/zip targets), not embedded in the tape
-//     binary itself.
-//   - Floppy target (-dSTORAGE_FLOPPY): pt3_load(uint8_t file_index),
+// arkos_load()'s signature (and this file reference) differs by target --
+// see arkos.h/docs/arkos.md -- not a bug, a real, intentional difference:
+//   - Tape/LOCI target: arkos_load(const char *path), loaded via LOCI at
+//     runtime into overlay RAM ($C000-$F9FF). Ships alongside
+//     build/oricdemo.tap in the USB/zip distribution (Makefile's usb/zip
+//     targets), not embedded in the tape binary itself.
+//   - Floppy target (-dSTORAGE_FLOPPY): arkos_load(uint8_t file_index),
 //     baked into the disk image at a fixed file-index slot (see
-//     tools/floppy/disk_script.txt).
+//     tools/floppy/disk_script.txt), loaded straight into that target's
+//     already-plain RAM at the same $C000 address.
 #ifdef STORAGE_FLOPPY
 #define MUSIC_FILE 1
 #else
-#define MUSIC_FILE "popcorn.pt3"
+#define MUSIC_FILE "steppingout.aky"
 #endif
 
 int main(void)
@@ -61,20 +50,20 @@ int main(void)
     // section_background_run below -- so it's audible from the very start
     // of the demo, not just once the (visually much slower) background/
     // footer setup below has already finished. Ticks at 50Hz via a raster
-    // IRQ (see docs/pt3.md and docs/rasterirq.md) -- entirely decoupled
+    // IRQ (see docs/arkos.md and docs/rasterirq.md) -- entirely decoupled
     // from every section's own busy-wait animation timing; once started
     // here it keeps playing regardless of what any section does
     // afterward, for the demo's entire run. Silently does nothing if the
     // music file isn't present (no LOCI device, or running a build where
-    // it wasn't shipped) -- see pt3_load()'s own graceful-failure
-    // behaviour. Has no dependency on the HIRES video setup below (pt3.c/
+    // it wasn't shipped) -- see arkos_load()'s own graceful-failure
+    // behaviour. Has no dependency on the HIRES video setup below (arkos.c/
     // rasterirq.c only ever touch the AY/VIA registers, never HIRESVRAM),
     // so nothing is lost by moving it ahead of it.
-    if (pt3_load(MUSIC_FILE))
+    if (arkos_load(MUSIC_FILE))
     {
-        pt3_init();
+        arkos_init();
         hrirq_init();
-        hrirq_add(100, pt3_tick);
+        hrirq_add(100, arkos_tick);
         hrirq_start();
     }
 
@@ -130,7 +119,7 @@ int main(void)
 
     // Master loop: each section owns its own state and pacing, called in
     // turn every tick (see section_bird.h/section_clouds.h/
-    // section_background.h). PT3 playback stays fully decoupled from
+    // section_background.h). Arkos playback stays fully decoupled from
     // this, ticking via its own raster IRQ.
     for (;;)
     {

@@ -290,8 +290,9 @@ typedef volatile struct {
 #define TIMER1_100HZ    9984    // Latch value for 100 Hz @ 1 MHz Oric clock
 #define TIMER1_50HZ     19968   // Latch value for 50 Hz @ 1 MHz Oric clock --
                                  // matches ART11's own measured cycles/frame;
-                                 // see include/pt3.h (PT3 music conventionally
-                                 // ticks at 50Hz, and shares this one timer
-                                 // with any include/rasterirq.h consumer)
+                                 // see include/arkos.h (Arkos music
+                                 // conventionally ticks at 50Hz, and shares
+                                 // this one timer with any
+                                 // include/rasterirq.h consumer)
 
 #endif  // ORIC_H

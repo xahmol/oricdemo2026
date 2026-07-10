@@ -169,8 +169,8 @@ void keyb_scan(void)
 {
     // PHP/PLP (not SEI/CLI) brackets this whole routine's VIA/AY access --
     // matches include/ijk.c's identical convention, for the same reason:
-    // include/ay.h's ay_write() (used by an IRQ-driven PT3 player, see
-    // include/pt3.h) touches the same VIA Port A/PCR registers and must
+    // include/ay.h's ay_write() (used by an IRQ-driven Arkos player, see
+    // include/arkos.h) touches the same VIA Port A/PCR registers and must
     // not be allowed to interleave with a scan already in progress.
     __asm { php }
     __asm { sei }

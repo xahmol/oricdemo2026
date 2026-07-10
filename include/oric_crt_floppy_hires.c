@@ -37,15 +37,26 @@
 //   $A000-$BF3F  HIRES bitmap (HIRESVRAM, 8000 bytes)
 //   $BF40-$BF67  Unused (42 bytes)
 //   $BF68-$BFDF  Built-in 3-line TEXT footer (HIRES_FOOTER)
-//   $BFE0-$F9FF  Unclaimed by any region (ROM is gone, but this target's
+//   $BFE0-$BFFF  Unclaimed by any region (ROM is gone, but this target's
 //                MVP doesn't reclaim it -- matches oric_crt_floppy.c's own
 //                existing convention for this range)
+//   $C000-$F9FF  Plain RAM (this target has NO ROM/overlay concept at all --
+//                see docs/floppy.md: "full RAM mapped at $C000-$FFFF for
+//                the whole session" -- unlike the tape/LOCI target, which
+//                needs oric.h's OVERLAY_ON/loci.c's enable_overlay_ram() to
+//                bank RAM in under real Atmos ROM). The Arkos Tracker
+//                (.aky) music buffer (ARKOS_MODULE) lives here at its
+//                base, $C000, same address as oric_crt_hires.c (see that
+//                file's own comment) for one shared file/convention across
+//                both targets. Deliberately capped at $F9FF, NOT the full
+//                $FFFF, purely to avoid overwriting the loader's own bytes
+//                below -- see docs/arkos.md.
 //   $FA00-$FFFF  OFF LIMITS -- tools/floppy/loader.c's resident code and
 //                its fixed API/vector block ($FFEF-$FFFF) live here for
 //                the demo's ENTIRE runtime (every floppy_load() call does
 //                `jsr $FFF7` into this range). Never place any region
-//                here. Well clear of the HIRES reservation above, so
-//                nothing here conflicts with it.
+//                here, and never let the music buffer's own size grow into
+//                it.
 //
 // $9800-$BFDF is deliberately left uncovered by any #pragma region below,
 // exactly as oric_crt_hires.c does -- so the linker never places code/

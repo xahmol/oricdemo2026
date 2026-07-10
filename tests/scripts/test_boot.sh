@@ -61,55 +61,36 @@ else
     check_found "title renders"       "ORIC DEMO 2026"          "$BOOT_DUMP"
     check_found "build-chain OK line" "Oscar64 build chain OK"  "$BOOT_DUMP"
     check_found "exit prompt renders" "Press any key to exit"   "$BOOT_DUMP"
-    # PT3 decoder test: tests/fixtures/music.pt3 (a small synthetic module,
-    # see src/main.c's comment) is loaded via LOCI (--loci-flash mounts
-    # tests/sandbox, where sandbox-reset copies it) and pt3_init()+one
-    # pt3_tick() computes these exact 14 AY register values -- hand-verified
-    # against the module's own hand-crafted commands (volume 15/ornament+
-    # sample 0/note 0 on channel A, volume 10/note 12 on channel B, release
-    # on channel C) before being locked in here. This is real behavioral
-    # verification of the decode path, not just "didn't crash".
-    #
-    # Byte 7 (mixer, 0x24) reflects a real fix: the tone/noise mixer-enable
-    # bits are now derived from the CURRENT sample step's own flags byte
-    # (bit4=tone mask, bit7=noise mask, both active-low) every tick, per
-    # ppt3.s's CH_MIX/CH_EXIT -- not a permanent per-channel latch that,
-    # once set by the unrelated noise-period-select command, never turned
-    # back off (a real, confirmed bug -- see project memory
-    # project_pt3_sample_select_bug's RESOLUTION section). 0x24 vs the old
-    # 0x3C differs in exactly the noise-A/noise-B bits, matching sample 0's
-    # own step-0 flags wanting noise on for those channels.
-    #
-    # Byte 9 (channel B's volume register, 0x0B) reflects a second real
-    # fix: PT3_VOLUME_TABLE (ppt3.s's own VolTableCreator table, precisely
-    # re-derived) replaces an earlier linear volume*amplitude combine that
-    # measurably under-represented most combinations -- channel B's own
-    # volume=10 combined with sample 0's own amplitude nibble now correctly
-    # resolves to 11 (0x0B), not 10 (0x0A), via the real table.
-    #
-    # tests/fixtures/music.pt3's sample 0 step 0 was patched (2 bytes
-    # swapped) for a third, separate real fix: fetching ppt3.s directly and
-    # tracing CH_NOAM shows the amplitude nibble added to CrAmSl comes from
-    # the sample step's SECOND byte (z80_B, this project's sam_mixflags),
-    # not its first (z80_C/sam_flags) -- see pt3_channel_tick()'s own
-    # comment and docs/pt3.md. The fixture originally put its test
-    # amplitude (0x0F) in the flags byte (matching the old, wrong read);
-    # swapping it into mixflags keeps this assertion exercising the same
-    # volume-table combine (15,15 -> 15 and 10,15 -> 11) under the
-    # corrected byte source, rather than silently degrading to amplitude=0.
-    check_found "PT3 tune loaded"       "PT3 tune loaded, AY regs:"    "$BOOT_DUMP"
-    check_found "PT3 AY registers"      "79 07 BD 03 00 00 00 24 0F 0B 00 00 00" "$BOOT_DUMP"
-    # PT3 effects test: tests/fixtures/music_effects.pt3 exercises
-    # portamento (channel A slides note 0 -> 12, delay=2/step=50, over 5
-    # ticks: 1913 -> 1913 -> 1863 -> 1863 -> 1813), vibrato (channel B,
-    # on=2/off=3 duration pulsing -- audible again by tick 5), and
-    # envelope-glide (delay=2/step=+10, sweeping the shared envelope
-    # period to 20 by tick 5) -- hand-computed tick-by-tick before being
-    # locked in, see docs/pt3.md's Verification section for the full trace.
-    # Bytes 7/9 updated 0x3C->0x24 and 0x0A->0x0B for the same two reasons
-    # as above.
-    check_found "PT3 effects tick 5"    "PT3 effects tick 5, AY regs:" "$BOOT_DUMP"
-    check_found "PT3 effects AY registers" "15 07 FD 04 00 00 00 24 0F 0B 00 14 00" "$BOOT_DUMP"
+    # Arkos decoder test: tests/fixtures/arkos_test.aky (a tiny synthetic
+    # module, 35 bytes, see src/buildtest.c's own comment) is loaded via
+    # LOCI (--loci-flash mounts tests/sandbox, where sandbox-reset copies
+    # it) and arkos_init()+one arkos_tick() computes these exact 14 AY
+    # register values -- hand-verified against a from-scratch Python decode
+    # replica of akyplayer.s (same methodology as the PT3 player's own
+    # verification), not just "didn't crash". Registers 0-5 (tone periods)
+    # and 11-13 (hardware envelope) stay 0 -- this fixture's byte pattern
+    # (NoSoftNoHard/NoSoftNoHard-or-loop paths only) never touches them.
+    # Register 6 (noise period) also stays 0 -- no noise bit ever set.
+    # Register 7 (mixer) is 0x1F: all 3 channels' NoSoftNoHard/-or-loop
+    # decode calls arkos_rb_close_tone() once each, shifted/accumulated
+    # into 0xE0 -> 0x1F across the 3-channel loop. Registers 8/9/10
+    # (volume A/B/C) are all 0x40 -- all 3 channels decode the SAME shared
+    # RegisterBlock byte (0x01, a real track/registerblock-reuse scenario,
+    # not a fixture shortcut -- see docs/arkos.md), so all 3 channels
+    # compute the identical volume value.
+    check_found "Arkos tune loaded"     "Arkos tune loaded, AY regs:"  "$BOOT_DUMP"
+    check_found "Arkos AY registers"    "00 00 00 00 00 00 00 1F 40 40 40 00 00" "$BOOT_DUMP"
+    # Arkos tick 4: 3 more NON-INITIAL frames (bytes 0x00, 0x04, 0x0C, see
+    # src/buildtest.c's own comment) continuing from wherever the previous
+    # frame's cursor left off within the SAME Track triple (duration 4) --
+    # exercises the NoSoftNoHard-or-loop dispatch's masked-value branching
+    # (0, 1, 3) without hitting the loop case itself (masked==2, exercised
+    # instead at the Linker level by this fixture's own end-of-song entry).
+    # Mixer stays 0x1F (same close_tone() accumulation each frame); volume
+    # A/B/C become 0x01 (byte 0x0C's own computed value, same for all 3
+    # channels since they're still decoding the same shared RegisterBlock).
+    check_found "Arkos tick 4"          "Arkos tick 4, AY regs:"       "$BOOT_DUMP"
+    check_found "Arkos tick 4 AY registers" "00 00 00 00 00 00 00 1F 01 01 01 00 00" "$BOOT_DUMP"
 fi
 
 echo ""

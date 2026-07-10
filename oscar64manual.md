@@ -1264,6 +1264,60 @@ __interrupt void modplay_tick(void) { /* logic */ }
 The `__asm` entry has zero C overhead. The `jsr/__interrupt/rts` trio is balanced
 so the hardware stack is clean when JMP executes.
 
+### `__interrupt` also disallows recursion, and has a "too complex" limit
+Confirmed on Oscar64 (Oric Atmos target, oricdemo2026's Arkos Tracker player):
+1. **No recursive functions** — error 3035 "No recursive functions in interrupt".
+   A reference algorithm's own "restart decode from a new pointer" mechanism
+   (calling back into the same top-level dispatch function) is a real recursive
+   cycle even if it always terminates. Fix: restructure the recursive call into
+   an explicit `for(;;)` loop with `continue` instead of a self-call.
+2. **"Function to complex for interrupt" (error 3035, sic)** — hit when the
+   `__interrupt`-qualified function's own reachable call graph got too large
+   (in this case: ~14 small dispatch functions called from one entry point).
+   Fix: collapse the call graph into fewer, larger functions with inline
+   if/else branching instead of many small ones — this is a case where *more*
+   modularity made the compiler's interrupt-safety analysis fail, not less.
+   The complexity threshold is sensitive to `-O` level in a non-obvious way:
+   the same code that failed at `-O1` compiled fine at `-O2` (higher
+   optimization apparently shrinks whatever metric this check uses — do not
+   assume `-O1` is the "safer" fallback if `-O2` hits this error).
+
+### Same `-O2` allocator bug (see below), confirmed again with different symptoms
+The Oric Atmos/Arkos case above hit the **same underlying bug** as "`-O2`
+whole-program register allocator: caller-save set can be under-counted"
+further down this file — but manifested completely differently, which is
+itself worth knowing: that entry's symptom was position-shifting garbage
+written to SCREEN RAM by an unrelated caller; here, after collapsing many
+small dispatch functions into one large one (to satisfy the "too complex
+for interrupt" check above), TWO functions that were *not*
+`__interrupt`-qualified at all silently computed WRONG VALUES with no
+crash and no visible corruption elsewhere:
+- A `while (n > 0) { ...; n = ...; }` loop silently never executed its
+  body, even though `n` was independently confirmed correct (via a raw
+  memory peek at the read address) at loop entry.
+- `some_func16((uint16_t)(ptr + 1))` returned the correct value when called
+  in isolation (a tiny standalone wrapper, same inputs), but returned the
+  WRONG value when the identical expression was inlined directly into a
+  large function with many other locals simultaneously live (a for-loop
+  counter, several `uint8_t`s, and a large multi-field struct).
+
+Same fix as the existing entry's spirit (reduce register pressure), applied
+differently since there was no interactive UI to eyeball here: **extract
+logic out of the large function into its own small `static` helper**,
+giving it an independent, much smaller stack frame — rather than the
+existing entry's "keep a dummy call to preserve register pressure"
+workaround (that trick doesn't apply when the bug is "wrong value", not
+"missing save/restore of a caller's own live register"). **Diagnostic
+technique that found this** (an alternative to that entry's `-g`/`.map`
+prologue inspection, useful when there's no interactive UI to watch for
+corruption): compare a value computed by a tiny isolated helper (same
+inputs) against the same computation's real call site, using an emulator's
+RAM-dump/screen-text capture to read out intermediate values
+non-interactively. Don't trust "it compiles and doesn't crash" as proof of
+correctness for a large, hot function on this target — verify actual
+computed values against an independent reference (e.g. a from-scratch
+interpreter/replica in another language) before trusting it.
+
 ### D64 disk image
 ```
 oscar64 main.c -d64=output.d64 -fz=resource.bin -f=uncompressed.bin
@@ -1683,7 +1737,10 @@ sprintf((char *)debug, "...", ...);
 ```
 Do not remove such a call without re-testing the full UI — its removal can
 silently re-break a caller's save-set. Full writeup with addresses/diffs:
-`~/.claude/oscar64.md`.
+`~/.claude/oscar64.md`. Same bug confirmed again on the Oric Atmos target
+(oricdemo2026's Arkos player) with a different symptom (silently WRONG
+computed values, no visible corruption) — see "Same `-O2` allocator bug"
+above, in the Non-C64 Bare-Metal Targets section.
 
 ---
 

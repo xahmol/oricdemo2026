@@ -28,9 +28,9 @@ the floppy target's own layout and boot mechanics.
 floppy-target program that also wants HIRES graphics needs both at once.
 `src/main.c` (the real demo, HIRES) builds with `oric_crt_hires.c` for the
 tape target and `oric_crt_floppy_hires.c` for the floppy target (the SAME
-source file, `#ifdef STORAGE_FLOPPY` picks the one difference: `pt3_load()`'s
+source file, `#ifdef STORAGE_FLOPPY` picks the one difference: `arkos_load()`'s
 signature — see that file); `src/buildtest.c` builds with the default
-runtime (TEXT-mode build-chain/LOCI/PT3 regression coverage, not demo
+runtime (TEXT-mode build-chain/LOCI/Arkos regression coverage, not demo
 content); `src/hires_test.c` builds with `oric_crt_hires.c` too (a separate,
 library-only test fixture, not demo content either); `src/floppy_test.c`
 builds with `oric_crt_floppy.c` (the floppy target's own regression
@@ -59,14 +59,14 @@ make run-phos   # launch the real demo (build/oricdemo.tap) visually in Phosphor
                 # both emulators give real AY audio; needs PHOSDIR in .env, oric1-emu
                 # built with SDL2=1
 make run-phos-buildtest # launch src/buildtest.c (build/buildtest.tap) visually in Phosphoric --
-                # the build-chain/LOCI/PT3 regression test, not the real demo
+                # the build-chain/LOCI/Arkos regression test, not the real demo
 make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.py unit tests
 make test-hires # opt-in: HIRES library Phosphoric smoke test (separate .tap, oric_crt_hires.c)
 make test-pictconv # oric_pictconv.py unit tests alone (pure Python, no emulator)
 make test-capture CYCLES=N TYPEKEYS='...'   # calibration helper, dumps RAM+screenshot, no assertions
-make usb        # copy build/oricdemo.tap + assets/popcorn.pt3 (real demo + music) to USBPATH (.env)
+make usb        # copy build/oricdemo.tap + assets/steppingout.aky (real demo + music) to USBPATH (.env)
 make docs       # README.md -> README.pdf (needs pandoc)
-make zip        # release ZIP (build/oricdemo.tap + assets/popcorn.pt3 + README.pdf)
+make zip        # release ZIP (build/oricdemo.tap + assets/steppingout.aky + README.pdf)
 make disk       # floppy-disk target, REAL demo -> build/oricdemo_floppy.dsk (see docs/floppy.md)
 make run-disk   # launch build/oricdemo_floppy.dsk (real demo) in Oricutron with --disk-rom microdisc.rom
 make test-disk  # opt-in: src/floppy_test.c's OWN regression disk (build/floppytest.dsk, separate
@@ -84,7 +84,7 @@ make clean
 - `src/main.c` — the real demo's entry point, HIRES mode, built for BOTH
   distribution targets (`oric_crt_hires.c` for tape, `oric_crt_floppy_hires.c`
   for floppy — same source, `#ifdef STORAGE_FLOPPY` only changes which
-  `pt3_load()` overload/music-file-reference is used). A thin sequencer:
+  `arkos_load()` overload/music-file-reference is used). A thin sequencer:
   `hires_init()`/mode-switch/background/footer/music setup, then a master
   loop calling each section's own `_tick()` function every iteration (see
   `src/section_bird.h`/`src/section_clouds.h`) — sections own their state,
@@ -111,12 +111,13 @@ make clean
 - `src/buildtest.c` — TEXT-mode build-chain regression test (default
   `oric_crt.c` runtime; NOT demo content, not built by `all`/`usb`/`zip`).
   Inits the TEXT-mode libraries and reports LOCI/IJK detection status on
-  screen, plus two PT3 decode-correctness checks (loads
-  `tests/fixtures/music.pt3` for one tick, then `music_effects.pt3` for five
-  ticks exercising portamento/vibrato/envelope-glide, printing the computed
-  AY register values each time — see `docs/pt3.md`'s Verification section).
-  Exercised by `make test`/`make run-phos-buildtest`. This is what used to
-  live in `src/main.c` before that became the real demo above.
+  screen, plus an Arkos decode-correctness check (loads
+  `tests/fixtures/arkos_test.aky`, a tiny synthetic module, and asserts AY
+  registers after 1 tick — exercising the INITIAL RegisterBlock decode path
+  — and again after 4 ticks — exercising 3 more NON-INITIAL frames — see
+  `docs/arkos.md`'s Verification section). Exercised by `make
+  test`/`make run-phos-buildtest`. This is what used to live in `src/main.c`
+  before that became the real demo above.
 - `src/hires_test.c` — HIRES-mode entry point (`oric_crt_hires.c` runtime). Growing
   test fixture for `include/hires.c`/`ttf.c`, exercised by `make test-hires` —
   not demo content, see `tests/scripts/test_hires.sh` for what's asserted.
@@ -125,7 +126,7 @@ make clean
   `tools/floppy/loader.c`'s boot handoff, not tape auto-run) — analogous to
   `src/buildtest.c` on the tape/LOCI side. NOT demo content, not built by
   `disk`/`run-disk`. Exercises `include/floppy.c`/the resident loader/
-  `pt3.c`'s `STORAGE_FLOPPY` backend, exercised by `make test-disk` (its
+  `arkos.c`'s `STORAGE_FLOPPY` backend, exercised by `make test-disk` (its
   own separate disk image, `build/floppytest.dsk`, distinct from the real
   demo's `build/oricdemo_floppy.dsk`) — see `docs/floppy.md` and
   `tests/scripts/test_disk.sh` for what's asserted.
@@ -183,16 +184,21 @@ make clean
   - `ay.c/h` — AY-3-8912 register-write helper (correct VIA/PCR protocol;
     an earlier version of `oric.h`'s own comment described the wrong one).
     See `docs/ay.md`.
-  - `pt3.c/h` — PT3 (Vortex Tracker) music player, ticking via `rasterirq.h`
-    at 50Hz (reprograms Timer 1's rate — see `docs/rasterirq.md`'s note on
-    this). Loads tunes via `loci.c` by default, or `floppy.c` under
-    `-dSTORAGE_FLOPPY` — `pt3_load()`'s signature differs by target
+  - `arkos.c/h` — Arkos Tracker (`.aky`) music player, ticking via
+    `rasterirq.h` at 50Hz. Replaces an earlier PT3 (Vortex Tracker) player
+    (archived on the `pt3` branch after several rounds of decode-bug fixes
+    still didn't produce satisfying music, and its runtime overhead was
+    judged too high). Unlike PT3, `.aky` files bake ABSOLUTE 16-bit
+    pointers into the Linker/Track tables at Arkos Tracker's own export
+    time — no relocation is done by this player, so every module MUST be
+    exported to (and is loaded at) a single fixed address, `$C000`, this
+    project's own overlay-RAM buffer (see `docs/arkos.md` for the full
+    memory-layout rationale, including why the tape/LOCI target needs
+    `loci.c`'s `enable_overlay_ram()` first and the floppy target doesn't).
+    Loads tunes via `loci.c` by default, or `floppy.c` under
+    `-dSTORAGE_FLOPPY` — `arkos_load()`'s signature differs by target
     (runtime path string vs. compile-time file index), a real, intentional
-    difference, not a bug (see `docs/floppy.md`). Notes, ornaments, samples,
-    volume, noise, envelope, tempo, and all four effects (portamento,
-    glissando, vibrato, envelope-glide) are implemented — the effects use a
-    standard, musically-correct design rather than a bit-exact replica of
-    the reference's own bookkeeping for those four. See `docs/pt3.md`.
+    difference, not a bug (see `docs/floppy.md`). See `docs/arkos.md`.
 - `tools/mktap.py` — wraps an Oscar64 raw `.bin` in an Oric `.tap` tape header.
 - `tools/oric_pictconv.py` — JPG/PNG -> HIRES bitmap converter (mono/colored/aic
   modes). See `docs/pictconv.md`.
@@ -217,8 +223,8 @@ make clean
   - `tests/scripts/test_disk.sh` — the `make test-disk` smoke test (floppy
     target, `src/floppy_test.c`); boots `build/oricdemo_floppy.dsk` under
     Phosphoric's Microdisc emulation (`--disk-rom`, no LOCI/tape at all) and
-    asserts the status lines, a `floppy_load()` payload check, and a
-    `pt3_load(file_index)` AY-register assertion. See `docs/floppy.md`.
+    asserts the status lines, a `floppy_load()` payload check, and an
+    `arkos_load(file_index)` AY-register assertion. See `docs/floppy.md`.
   - `tests/scripts/test_pictconv.py` — `oric_pictconv.py` unit tests (`make
     test-pictconv`), pure Python, no emulator.
   - `tests/scripts/test_floppybuilder.py` — `tools/oric_floppybuilder.py`
@@ -227,11 +233,11 @@ make clean
     test run, plus checked-in test images/expected `.bin`s for
     `test_pictconv.py`, `tests/fixtures/ttf_test_font.h` (a pre-generated
     font header so `test_hires.sh` doesn't depend on a system font), and
-    `tests/fixtures/music.pt3`/`music_effects.pt3` (small hand-built
-    synthetic PT3 modules, not real tunes, for `pt3.c`'s decode-correctness
-    tests — see `docs/pt3.md`). Phosphoric needs `--loci-flash tests/sandbox`
-    (not just bare `--loci`) for `pt3_load()`'s `file_load()` to actually
-    find them.
+    `tests/fixtures/arkos_test.aky` (a tiny hand-built synthetic module, not
+    a real tune, for `arkos.c`'s decode-correctness tests — see
+    `docs/arkos.md`). Phosphoric needs `--loci-flash tests/sandbox` (not
+    just bare `--loci`) for `arkos_load()`'s `file_load()` to actually
+    find it.
   - `tests/sandbox/`, `tests/out/` — gitignored scratch, regenerated per run.
 - `assets/` — real demo assets consumed by `src/section_*.c` files (as opposed
   to `tests/fixtures/`, which only test scaffolding uses). `assets/bird.h` —
@@ -260,9 +266,3 @@ make clean
 - HIRES-mode programs get **less usable RAM** than TEXT-mode ones (~36.1 KB vs.
   ~42.4 KB code/data/bss) — see `docs/hires.md`'s memory-layout table before
   assuming the default runtime's budget applies.
-- The floppy-disk target has a real, narrow, unresolved discrepancy: the AY
-  mixer register computed by `pt3_tick()` differs from the tape/LOCI
-  target's value for the same fixture, despite identical loaded module data
-  and identical persistent channel state — see `docs/floppy.md`'s "Known
-  issues" section before assuming PT3 playback is bit-identical across both
-  targets.

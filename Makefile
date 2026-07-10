@@ -100,7 +100,7 @@ MAIN_SRCS = \
   src/section_bird.c    \
   src/section_bird.h    \
   assets/bird.h         \
-  assets/popcorn.pt3    \
+  assets/steppingout.aky \
   include/oric_crt_hires.c \
   include/crt_math.c    \
   include/oric.h        \
@@ -110,8 +110,8 @@ MAIN_SRCS = \
   include/sprite.h      \
   include/fixedmath.c   \
   include/fixedmath.h   \
-  include/pt3.c         \
-  include/pt3.h         \
+  include/arkos.c       \
+  include/arkos.h       \
   include/ay.c          \
   include/ay.h          \
   include/rasterirq.c   \
@@ -164,8 +164,8 @@ MAIN_BUILDTEST_SRCS = \
   include/rasterirq.h   \
   include/ay.c          \
   include/ay.h          \
-  include/pt3.c         \
-  include/pt3.h
+  include/arkos.c       \
+  include/arkos.h
 
 # -------------------------------------------------------------------------
 # HIRES test fixture -- separate program, built with the alternate
@@ -276,7 +276,7 @@ FLOPPY_SRCS = \
   src/section_bird.c       \
   src/section_bird.h       \
   assets/bird.h            \
-  assets/popcorn.pt3      \
+  assets/steppingout.aky   \
   include/oric_crt_floppy_hires.c \
   include/crt_math.c       \
   include/oric.h           \
@@ -292,16 +292,16 @@ FLOPPY_SRCS = \
   include/rasterirq.h      \
   include/ay.c             \
   include/ay.h             \
-  include/pt3.c            \
-  include/pt3.h
+  include/arkos.c          \
+  include/arkos.h
 
 FLOPPY_LOADER_SRCS = tools/floppy/loader.c
 FLOPPY_BOOTSECTOR_SRCS = tools/floppy/bootsector_microdisc.c
 
-# File index 0 = the demo itself (boot handoff); 1 = assets/popcorn.pt3,
-# via pt3_load(1) (STORAGE_FLOPPY) -- see src/main.c's MUSIC_FILE and
+# File index 0 = the demo itself (boot handoff); 1 = assets/steppingout.aky,
+# via arkos_load(1) (STORAGE_FLOPPY) -- see src/main.c's MUSIC_FILE and
 # tools/floppy/disk_script_demo.txt.
-FLOPPY_MUSIC_BIN = assets/popcorn.pt3
+FLOPPY_MUSIC_BIN = assets/steppingout.aky
 
 # -------------------------------------------------------------------------
 # Two-pass build (see docs/floppy.md):
@@ -463,13 +463,13 @@ FLOPPYTEST_SRCS = \
   include/rasterirq.h      \
   include/ay.c             \
   include/ay.h             \
-  include/pt3.c            \
-  include/pt3.h
+  include/arkos.c          \
+  include/arkos.h
 
 # Test fixtures baked into the disk image (see src/floppy_test.c's own
 # file-index convention comment: 0 = itself, 1 = payload, 2 = music).
 FLOPPYTEST_PAYLOAD_BIN = tests/fixtures/floppy_payload_test.bin
-FLOPPYTEST_MUSIC_BIN   = tests/fixtures/music.pt3
+FLOPPYTEST_MUSIC_BIN   = tests/fixtures/arkos_test.aky
 
 build/floppytest_loader_placeholder.bin: $(FLOPPY_LOADER_SRCS)
 	@$(MKDIR) build 2>$(NULLDEV) ; true
@@ -642,7 +642,7 @@ run: build/$(MAIN).tap
 
 # Launch the real demo (build/$(MAIN).tap, tape/LOCI target) visually in
 # Phosphoric instead of Oricutron (fast-loads the tape, auto-runs, and
-# mounts assets/ as the LOCI flash root so pt3_load()'s "popcorn.pt3"
+# mounts assets/ as the LOCI flash root so arkos_load()'s "steppingout.aky"
 # resolves). Phosphoric DOES emulate real AY audio -- this is just as valid
 # a way to see/hear the real demo as Oricutron's own 'make run'.
 # Needs PHOSDIR in .env -- see check-phosphoric. Not headless: opens a real
@@ -656,8 +656,8 @@ run-phos: check-phosphoric build/$(MAIN).tap
 
 # Launch the build-chain/LOCI regression test (src/buildtest.c) visually in
 # Phosphoric -- the smoke-test equivalent of 'run-phos' above, exercising
-# LOCI/IJK detection and the PT3 decode-correctness fixtures
-# (tests/fixtures/music.pt3/music_effects.pt3), not the real demo.
+# LOCI/IJK detection and the Arkos decode-correctness fixture
+# (tests/fixtures/arkos_test.aky), not the real demo.
 run-phos-buildtest: check-phosphoric build/$(MAIN_BUILDTEST).tap
 	$(PHOS) -r $(ATMOSROM) \
 	    -t build/$(MAIN_BUILDTEST).tap -f --loci-flash tests/fixtures
@@ -680,7 +680,7 @@ check-usb:
 
 usb: check-usb all
 	cp build/$(MAIN).tap "$(USBPATH)/"
-	cp assets/popcorn.pt3 "$(USBPATH)/"
+	cp assets/steppingout.aky "$(USBPATH)/"
 	@if [ "$(IS_WSL2)" = "1" ]; then \
 	    echo "WSL2: unmounting $(USBMOUNT)..."; \
 	    sudo umount $(USBMOUNT); \
@@ -785,7 +785,7 @@ zip: all docs
 	$(MKDIR) build 2>$(NULLDEV) ; true
 	zip -j build/$(ZIPNAME).zip \
 	    build/$(MAIN).tap \
-	    assets/popcorn.pt3 \
+	    assets/steppingout.aky \
 	    README.pdf
 	@echo "Created build/$(ZIPNAME).zip"
 
