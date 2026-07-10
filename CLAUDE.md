@@ -64,9 +64,9 @@ make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.p
 make test-hires # opt-in: HIRES library Phosphoric smoke test (separate .tap, oric_crt_hires.c)
 make test-pictconv # oric_pictconv.py unit tests alone (pure Python, no emulator)
 make test-capture CYCLES=N TYPEKEYS='...'   # calibration helper, dumps RAM+screenshot, no assertions
-make usb        # copy build/oricdemo.tap + assets/oxygene4.pt3 (real demo + music) to USBPATH (.env)
+make usb        # copy build/oricdemo.tap + assets/popcorn.pt3 (real demo + music) to USBPATH (.env)
 make docs       # README.md -> README.pdf (needs pandoc)
-make zip        # release ZIP (build/oricdemo.tap + assets/oxygene4.pt3 + README.pdf)
+make zip        # release ZIP (build/oricdemo.tap + assets/popcorn.pt3 + README.pdf)
 make disk       # floppy-disk target, REAL demo -> build/oricdemo_floppy.dsk (see docs/floppy.md)
 make run-disk   # launch build/oricdemo_floppy.dsk (real demo) in Oricutron with --disk-rom microdisc.rom
 make test-disk  # opt-in: src/floppy_test.c's OWN regression disk (build/floppytest.dsk, separate

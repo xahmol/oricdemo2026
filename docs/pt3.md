@@ -22,14 +22,28 @@ dispatch arithmetic hand-verified) vs. which parts use the well-established,
 cross-platform PT3 algorithm/format conventions instead of replicating that
 one 6502 implementation's specific hand-optimized instruction sequences.
 
-**Demo music**: `assets/oxygene4.pt3`, used by `src/main.c`, is also from
+**Demo music**: `assets/popcorn.pt3`, used by `src/main.c`, is also from
 `6502Nerd/dflat`'s own `Oric/software/project/pt3/tunes/` collection (same
-MIT-licensed repo as the player above) — a chiptune cover of Jean-Michel
-Jarre's "Oxygène IV". Used deliberately, understanding it's a cover of a
-commercial track (common, low-risk-in-practice demoscene convention for
-personal/non-commercial use — nearly every tune in that same `tunes/`
-collection is a cover of a well-known commercial track), distinct from the
-repo's own MIT-licensed code.
+MIT-licensed repo as the player above) — a chiptune cover of "Popcorn"
+(composed by Gershon Kingsley, 1969; popularized by Hot Butter's 1972
+synth-instrumental recording). Used deliberately, understanding it's a
+cover of a commercial track (common, low-risk-in-practice demoscene
+convention for personal/non-commercial use — nearly every tune in that
+same `tunes/` collection is a cover of a well-known commercial track),
+distinct from the repo's own MIT-licensed code.
+
+**Replaces an earlier choice**, `assets/oxygene4.pt3` (a cover of Jean-
+Michel Jarre's "Oxygène IV") — swapped out after full decode-correctness
+verification (see "Three real, confirmed bugs" below) confirmed that
+file's own bass instrument (sample 9) genuinely mixes noise into its 3
+loudest attack steps by design in the file's own data, not a decode bug;
+the user found this didn't read as a clean bassline once everything else
+was fixed. `popcorn.pt3` was pre-screened the same way before adopting
+it — decodes cleanly for 8000 simulated ticks (~160s) with zero
+undefined-sample/out-of-range-note errors, and uses noise on only ~22% of
+its own sample steps overall (a from-scratch Python decode replica was
+used for this, the same technique used throughout this file's own
+debugging history — see "Diagnostic technique" notes in project memory).
 
 ## API
 

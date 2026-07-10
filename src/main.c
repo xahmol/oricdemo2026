@@ -17,12 +17,26 @@
 #include "section_bird.h"
 #include "section_clouds.h"
 
-// Background music: assets/oxygene4.pt3, from 6502Nerd/dflat's own
+// Background music: assets/popcorn.pt3, from 6502Nerd/dflat's own
 // tunes/ collection (the same MIT-licensed repo this project's PT3 player
 // itself is ported from -- see docs/pt3.md's Attribution section). A
-// chiptune cover of Jean-Michel Jarre's "Oxygene IV" -- used deliberately,
-// same low-risk-in-practice demoscene convention as the rest of that
-// tunes/ collection (nearly all covers of commercial tracks).
+// chiptune cover of "Popcorn" (Gershon Kingsley, 1969; popularized by Hot
+// Butter's 1972 synth recording) -- used deliberately, same low-risk-in-
+// practice demoscene convention as the rest of that tunes/ collection
+// (nearly all covers of commercial tracks). Replaces an earlier choice,
+// assets/oxygene4.pt3 (a cover of Jean-Michel Jarre's "Oxygene IV") --
+// swapped out because that file's own bass instrument (sample 9) mixes
+// noise into its loudest attack steps by design, which the user found did
+// not read as a clean bassline once decode correctness was fully verified
+// (see docs/pt3.md's "Three real, confirmed bugs" section's item 3 for
+// the full investigation -- the noise-on-attack was confirmed to be
+// genuine data in that file, not a decode bug, via byte-level inspection
+// and cross-checking against 3 independent PT3 player implementations).
+// This file was pre-screened the same way before adopting it: decoded
+// cleanly for 8000 simulated ticks (~160s) with zero undefined-sample/
+// out-of-range-note errors, and its own sample definitions use noise on
+// only ~22% of steps overall (vs. oxygene4.pt3's bass instrument using it
+// on 3 of its 7 steps, including its 3 loudest).
 //
 // pt3_load()'s signature (and this file reference) differs by target --
 // see pt3.h/docs/pt3.md -- not a bug, a real, intentional difference:
@@ -36,7 +50,7 @@
 #ifdef STORAGE_FLOPPY
 #define MUSIC_FILE 1
 #else
-#define MUSIC_FILE "oxygene4.pt3"
+#define MUSIC_FILE "popcorn.pt3"
 #endif
 
 int main(void)
