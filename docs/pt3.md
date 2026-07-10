@@ -194,6 +194,25 @@ yet a reported symptom). This byte's low nibble is **not** an amplitude
 value — see the note below on the amplitude nibble's real source, an
 earlier bug in this exact area.
 
+**Two further known gaps, found by the same Opus-model cross-reference
+audit that found bug #3 below, confirmed against `ppt3.s` AND deater's
+`vmw-meter/ay-3-8910/pt3/pt3_lib.c`, but NOT yet fixed** (neither is the
+cause of any currently-reported symptom — `oxygene4.pt3`'s own
+noise-enabled sample steps all happen to carry a zero offset, so these
+gaps are latent for this specific song, not necessarily for others):
+- **No per-step noise-period offset.** Both references add a small offset
+  (derived from `sam_flags`'s upper bits, `ppt3.s`'s `AddToNs`) to the
+  shared noise-period register on any step with noise enabled — used for
+  "tuned noise" effects (a snare/hi-hat sample deliberately detuning the
+  shared noise generator per step). `pt3_tick()` here just writes
+  `pt3_noise_period` directly, ignoring any such offset.
+- **No per-step envelope-period slide.** Symmetric to the effect-level
+  envelope-glide (`C_ENGLS` special command 8, already implemented —see
+  "Effects" below): both references also let a sample step (`sam_flags`
+  bit7) feed its own accumulator into the shared envelope period
+  (`ppt3.s`'s `AddToEn`). Only matters for envelope-driven instruments;
+  none of `oxygene4.pt3`'s currently-used samples enable this.
+
 The **mix-flags byte** (`sam_mixflags`, `z80_B`): **bits 0-3 are the
 amplitude nibble** (0-15, combined with the channel's own volume via
 `PT3_VOLUME_TABLE` — see "What's precisely traced" below); **bit 4 is the
@@ -203,8 +222,8 @@ step**; **bit 6 controls whether the tone delta *accumulates*** into the
 channel's running total (persists across ticks — a gliding/vibrato-via-
 sample effect) or is applied fresh each step without carrying forward.
 
-**Two real, confirmed bugs have lived in this exact area, at two different
-times:**
+**Three real, confirmed bugs have lived in this exact area, across three
+separate rounds of debugging:**
 
 1. An earlier draft set a per-channel `noise_enabled` flag to `true` the
    first time ANY row used the noise-*period*-select command (`0x20-0x3F`,
@@ -246,6 +265,37 @@ times:**
    both fixtures' sample-0 step-0 flags/mixflags bytes were swapped to keep
    testing the same volume-table combine under the corrected byte source
    (see `tests/scripts/test_boot.sh`'s own comment on this).
+3. **A note strike didn't reset `sample_pos`/`ornament_pos`.** `ppt3.s`'s
+   `PD_NOTE` falls through to `PD_RES`, which zeroes a whole block of
+   per-channel state on every fresh note — including byte 0 (`PsInOr`,
+   ornament position) and byte 1 (`PsInSm`, sample position), not just
+   `tone_acc`/`CrAmSl` (already reset here, see their own comments above).
+   An independent reference (deater's `vmw-meter/ay-3-8910/pt3/pt3_lib.c`)
+   agrees: its own note-command handler explicitly zeroes both positions
+   too. Without this, a channel that selects its sample/ornament ONCE via
+   a combined command and then re-strikes plain notes for the rest of a
+   pattern — a completely ordinary way to write a repeating bassline —
+   never restarted its sample's own envelope on those later strikes:
+   `sample_pos` just kept advancing/looping from wherever it already was,
+   so every note after the first played whatever step the sample happened
+   to be looping on (often a quiet late/loop step) instead of the sample's
+   own attack transient. Confirmed against `assets/oxygene4.pt3`'s own
+   channel C (a fast bassline using sample 9, a 7-step plucked instrument
+   with amplitudes `11,11,9,7,6,6,6` looping back to step 4): before the
+   fix, the AY volume register settled into the loop's low steps (~4-6)
+   and stayed there for the whole pattern; after the fix, it clearly
+   re-attacks (e.g. `0x0C → 0x0A → 0x07 → 0x06 → 0x05`, then straight back
+   up to `0x08`+ on the next note) — the difference between a flat drone
+   and a rhythmically plucked bassline. Found via a dedicated Opus-model
+   audit cross-checking `pt3.c` against `ppt3.s` plus two independent
+   platform references, specifically asked for after fix #2 above resolved
+   the general "volume too low" complaint but one channel's bassline still
+   didn't sound right. Fixed by adding `chan->sample_pos = 0;
+   chan->ornament_pos = 0;` to the note handler (covering both the plain
+   and portamento branches); also reset `vibrato_counter`/`vibrato_audible`
+   there for the same reason (`ppt3.s`'s `PD_RES` zeroes `COnOff` too) —
+   vibrato pulsing should start fresh on a new note, not resume mid-cycle
+   from the previous one.
 
 ## Effects: glissando, portamento, vibrato, envelope-glide
 
@@ -359,7 +409,7 @@ things, each clearly delineated:
     set (bit6 picks direction), added to the raw amplitude nibble before
     the table lookup. Getting **which byte** supplies that raw nibble was
     itself a second, separately-confirmed bug — see the format section
-    above ("Two real, confirmed bugs") for the full story: it must come
+    above ("Three real, confirmed bugs") for the full story: it must come
     from `sam_mixflags`, not `sam_flags`.
   - **Mixer/noise bits**: NO LONGER a scope cut either — both tone-enable
     and noise-enable are derived fresh every tick from the CURRENT sample

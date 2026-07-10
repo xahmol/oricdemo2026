@@ -533,6 +533,30 @@ static bool pt3_decode_command(Pt3Channel *chan)
         // this, a slide accumulated during a PREVIOUS note would carry
         // into the new one, biasing its amplitude for no musical reason.
         chan->amp_slide = 0;
+        // A real, confirmed bug lived here: a note strike did NOT reset
+        // sample_pos/ornament_pos, even though ppt3.s's PD_RES zeroes them
+        // as part of the same per-channel reset block (its own struct
+        // layout: byte 0 = PsInOr/ornament position, byte 1 = PsInSm/
+        // sample position), and independent references (e.g. deater's
+        // vmw-meter pt3_lib.c, its own note-command handler) agree. A
+        // channel that selects its sample/ornament ONCE per pattern (via
+        // an orn+sample command on its first note) and then re-strikes
+        // plain notes for the rest of the pattern -- a completely normal,
+        // common composition pattern for a repeating bassline -- never
+        // restarted its sample's own envelope on those later strikes:
+        // `sample_pos` just kept advancing (and looping) from wherever it
+        // was, so every note after the first played whatever step the
+        // sample happened to be looping on instead of the sample's own
+        // attack transient (e.g. a plucked-bass instrument's loud opening
+        // steps), a real, confirmed, audible cause of a bassline sounding
+        // flat/wrong instead of rhythmically plucked. Also resets
+        // vibrato_counter/vibrato_audible for the same reason (ppt3.s's
+        // PD_RES zeroes COnOff too) -- a note strike should start any
+        // vibrato pulsing fresh, not mid-cycle from a previous note.
+        chan->sample_pos = 0;
+        chan->ornament_pos = 0;
+        chan->vibrato_counter = 0;
+        chan->vibrato_audible = true;
         chan->enabled = true;
         return true;
     }
