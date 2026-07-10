@@ -74,6 +74,22 @@ void hspr_erase(const HiresBitmap *screen, HiresSprite *spr);
 //     back. Restores byte-exact regardless of what's underneath -- more
 //     robust than XOR (no "must match the last draw exactly" constraint),
 //     at the cost of that extra buffer.
+//   HXSPR_OR_SPARSE -- identical to HXSPR_OR, except any image byte equal
+//     to the exact value 0xFF (never a real pixel byte: only bits 0-5 are
+//     ever meaningful, so real data never exceeds 0x7F) is treated as
+//     "leave this byte completely alone" -- no read, no write, no backup
+//     save/restore. Plain HXSPR_OR's `dst[i]=dst[i]|(image[i]&0x3F)|0x40`
+//     STILL forces bit6=1 even for an all-zero image byte, which is fine
+//     for real pixel data (bit6 is always 1 there anyway) but corrupts a
+//     genuine ATTRIBUTE byte (bit6=0, e.g. section_background.c's tree
+//     ink-brackets -- see oric.md's `(byte&0x60)==0` rule) if the sprite's
+//     body ever crosses one, same underlying issue XOR has (see above),
+//     just for the BODY instead of the colour bracket. Use this mode (with
+//     0xFF-marked "hole" columns in the image, see section_bird.c's
+//     bird_prepare_frame()) when a sprite's body can cross real background
+//     attribute bytes it must leave completely untouched -- costs a
+//     narrow, correctly-shaped "hole" in the sprite's own silhouette at
+//     that column instead.
 //
 // Neither mode is truly opaque: both only touch screen bits where the
 // sprite's own bit is 1 (XOR toggles them, OR sets them) -- wherever the
@@ -83,7 +99,8 @@ void hspr_erase(const HiresBitmap *screen, HiresSprite *spr);
 
 typedef enum {
     HXSPR_XOR,
-    HXSPR_OR
+    HXSPR_OR,
+    HXSPR_OR_SPARSE
 } HxsprMode;
 
 // Optional ink-only colour bracket (see docs/sprite.md's "Colour" section).
@@ -91,19 +108,30 @@ typedef enum {
 // `col-1` (the sprite's own colour) and another at `col+w_bytes`
 // (restoring the baseline colour for the rest of the scanline) on every
 // row the sprite occupies -- attribute bytes are per-scanline, so this
-// repeats every row, not just once. hxspr_erase() reverts BOTH bracket
-// columns to ordinary blank pixel data (0x40), NOT to an ink attribute --
-// a moving sprite visits many different columns over its lifetime, and
-// leaving a past position's bracket as a permanent attribute byte would
-// steal that column from the background bitmap forever (it can never show
-// pixel content again). This assumes the background under the brackets is
-// blank; a sprite moving over real background art at the bracket columns
-// would need actual save/restore of those 2 bytes instead of a hardcoded
-// 0x40, not built here. PAPER is assumed constant across the whole screen
-// (set once, e.g. via hires_row_colors()) and is never touched here -- if
-// a sprite ever needs its own PAPER too, that's a bigger change (see
-// docs/sprite.md). Caller must leave column `col-1` free (col >= 1) and
-// `col+w_bytes` within the row (col+w_bytes <= HIRES_ROW_BYTES-1).
+// repeats every row, not just once.
+//
+// `color_backup`, if non-NULL, must point to a caller-owned `2*h`-byte
+// buffer: hxspr_draw() saves the REAL byte that was at `col-1`/`col+w_bytes`
+// (whatever it was -- pixel data or another attribute byte) into it before
+// overwriting, and hxspr_erase() restores those exact bytes instead of a
+// hardcoded blank -- required for a sprite that moves over real background
+// art at the bracket columns (e.g. section_bird.c flying low enough to
+// overlap section_background.c's trees); without this, erase used to
+// hardcode both bracket columns back to blank pixel data (0x40), which is
+// only correct if the background under them is guaranteed blank, and
+// silently destroyed any real pixel/attribute content that happened to be
+// there otherwise (a real, confirmed bug -- the bird permanently erasing
+// tree pixels it flew low enough to overlap).
+//
+// Pass `color_backup` as NULL only if the background under BOTH bracket
+// columns is guaranteed blank for the sprite's entire range of travel --
+// hxspr_erase() then falls back to the old hardcoded-blank behaviour.
+//
+// PAPER is assumed constant across the whole screen (set once, e.g. via
+// hires_row_colors()) and is never touched here -- if a sprite ever needs
+// its own PAPER too, that's a bigger change (see docs/sprite.md). Caller
+// must leave column `col-1` free (col >= 1) and `col+w_bytes` within the
+// row (col+w_bytes <= HIRES_ROW_BYTES-1).
 typedef struct {
     bool    enabled;
     uint8_t ink;           // this sprite's own ink, set at col-1 while drawn
@@ -113,17 +141,21 @@ typedef struct {
 // Draws `image` (w_bytes wide, h rows, tightly packed -- w_bytes*h bytes
 // total, NOT the h*HIRES_ROW_BYTES a HiresSprite canvas costs) onto
 // `screen` at column-byte `col`, row `y`, per `mode`. Pass `color` as NULL
-// (or `enabled=false`) for a plain monochrome sprite.
+// (or `enabled=false`) for a plain monochrome sprite. `color_backup` is
+// only used when `color` is enabled -- see HxsprColor's own comment.
 void hxspr_draw(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes, uint8_t h,
-                 uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color);
+                 uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color,
+                 uint8_t *color_backup);
 
 // Restores the screen at `col`/`y`. For HXSPR_XOR, `image` must be the
 // SAME image currently drawn there (re-XORs it away); for HXSPR_OR,
 // `image` is ignored (restores from `backup` instead). If `color` was
-// used to draw, pass the same `color` here too, to revert both bracket
-// columns to blank pixel data (see HxsprColor's own comment).
+// used to draw, pass the same `color` AND `color_backup` here too, to
+// revert both bracket columns to their real saved bytes (see
+// HxsprColor's own comment).
 void hxspr_erase(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes, uint8_t h,
-                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color);
+                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color,
+                  uint8_t *color_backup);
 
 #pragma compile("sprite.c")
 

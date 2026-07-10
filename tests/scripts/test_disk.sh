@@ -91,8 +91,17 @@ else
     # (see that file's own comment) -- the module's tail sat in the final,
     # non-256-aligned partial sector, which the buggy decrement logic
     # silently never loaded, corrupting the mixer byte specifically. Now
-    # correctly matches the tape/LOCI target's 3C on both platforms.
-    check_found "PT3 AY registers"          "79 07 BD 03 00 00 00 3C 0F 0A 00 00 00" "$BOOT_DUMP"
+    # correctly matches the tape/LOCI target on both platforms -- and both
+    # were updated again, 3C -> 24, when the tone/noise mixer-enable bits
+    # were fixed to come from the current sample step's own flags byte
+    # every tick instead of a permanent per-channel latch, and 0A -> 0B
+    # (byte 9, channel B's volume) when the linear volume/amplitude
+    # combine was replaced with the real PT3_VOLUME_TABLE -- and the
+    # fixture itself (sample 0 step 0) was later patched to swap its
+    # flags/mixflags bytes when a further fix moved the amplitude-nibble
+    # read from the first sample-step byte to the second (see
+    # test_boot.sh's own comment on this exact same fixture for the story).
+    check_found "PT3 AY registers"          "79 07 BD 03 00 00 00 24 0F 0B 00 00 00" "$BOOT_DUMP"
     check_found "exit prompt renders"       "Press any key to exit"         "$BOOT_DUMP"
 fi
 

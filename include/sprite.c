@@ -31,7 +31,8 @@ void hspr_erase(const HiresBitmap *screen, HiresSprite *spr)
 }
 
 void hxspr_draw(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes, uint8_t h,
-                 uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color)
+                 uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color,
+                 uint8_t *color_backup)
 {
     uint8_t *dst = screen->data + (uint16_t)y * HIRES_ROW_BYTES + col;
     uint8_t row;
@@ -42,6 +43,12 @@ void hxspr_draw(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes
         uint8_t *right = dst + w_bytes;
         for (row = 0; row < h; row++)
         {
+            if (color_backup)
+            {
+                color_backup[0] = *left;
+                color_backup[1] = *right;
+                color_backup += 2;
+            }
             *left = color->ink;
             *right = color->restore_ink;
             left += HIRES_ROW_BYTES;
@@ -52,10 +59,12 @@ void hxspr_draw(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes
     for (row = 0; row < h; row++)
     {
         uint8_t i;
-        if (mode == HXSPR_OR)
+        if (mode == HXSPR_OR || mode == HXSPR_OR_SPARSE)
         {
             for (i = 0; i < w_bytes; i++)
             {
+                if (mode == HXSPR_OR_SPARSE && image[i] == 0xFF)
+                    continue;   // "hole" column -- leave dst/backup completely untouched
                 backup[i] = dst[i];
                 dst[i] = (uint8_t)(dst[i] | (image[i] & 0x3F) | 0x40);
             }
@@ -72,7 +81,8 @@ void hxspr_draw(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes
 }
 
 void hxspr_erase(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes, uint8_t h,
-                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color)
+                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color,
+                  uint8_t *color_backup)
 {
     uint8_t *dst = screen->data + (uint16_t)y * HIRES_ROW_BYTES + col;
     uint8_t row;
@@ -80,10 +90,14 @@ void hxspr_erase(const HiresBitmap *screen, const uint8_t *image, uint8_t w_byte
     for (row = 0; row < h; row++)
     {
         uint8_t i;
-        if (mode == HXSPR_OR)
+        if (mode == HXSPR_OR || mode == HXSPR_OR_SPARSE)
         {
             for (i = 0; i < w_bytes; i++)
+            {
+                if (mode == HXSPR_OR_SPARSE && image[i] == 0xFF)
+                    continue;   // matches the draw call's own skip -- see hxspr_draw()
                 dst[i] = backup[i];
+            }
             backup += w_bytes;
         }
         else   // HXSPR_XOR
@@ -97,21 +111,28 @@ void hxspr_erase(const HiresBitmap *screen, const uint8_t *image, uint8_t w_byte
 
     if (color && color->enabled)
     {
-        // Revert BOTH bracket columns to ordinary blank pixel data (0x40),
-        // not to an ink attribute -- a moving sprite visits many different
-        // columns over time, and leaving a past position's bracket as an
-        // attribute byte permanently steals that column from the
-        // background bitmap (it can never show pixel content again).
-        // This assumes the background under the brackets is blank (true
-        // for this demo's current blank canvas) -- a sprite moving over
-        // real background art at the bracket columns would need actual
-        // save/restore of those 2 bytes instead, not built here.
+        // Revert both bracket columns to their real saved bytes
+        // (color_backup, filled in by the matching hxspr_draw() call) --
+        // NOT a hardcoded blank, which would silently destroy any real
+        // pixel/attribute content that happened to be sitting there (see
+        // HxsprColor's own comment). Falls back to hardcoded blank pixel
+        // data (0x40) only if the caller didn't provide a color_backup
+        // buffer, matching this function's old behaviour for that case.
         uint8_t *left = screen->data + (uint16_t)y * HIRES_ROW_BYTES + col - 1;
         uint8_t *right = screen->data + (uint16_t)y * HIRES_ROW_BYTES + col + w_bytes;
         for (row = 0; row < h; row++)
         {
-            *left = 0x40;
-            *right = 0x40;
+            if (color_backup)
+            {
+                *left = color_backup[0];
+                *right = color_backup[1];
+                color_backup += 2;
+            }
+            else
+            {
+                *left = 0x40;
+                *right = 0x40;
+            }
             left += HIRES_ROW_BYTES;
             right += HIRES_ROW_BYTES;
         }

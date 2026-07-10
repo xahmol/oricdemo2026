@@ -6,6 +6,14 @@
 #
 # make run requires Oricutron; see ORICUTRON_HOME below
 
+# Bare 'make' must build the real tape demo (build/oricdemo.tap), per this
+# project's own documented convention (see CLAUDE.md) -- without this,
+# Make's default goal is simply the FIRST target textually defined below
+# (the floppy pipeline's build/floppy_loader_placeholder.bin, since 'all:'
+# itself is defined much further down), a real, confirmed discrepancy from
+# the documented behaviour.
+.DEFAULT_GOAL := all
+
 # -------------------------------------------------------------------------
 # Cross-platform portability (Windows CMD vs POSIX)
 # -------------------------------------------------------------------------
@@ -586,7 +594,7 @@ CYCLES   ?= 8000000
 # all: must appear first so it is the default goal
 # =========================================================================
 
-.PHONY: all clean run run-phos docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
+.PHONY: all clean run run-phos run-phos-buildtest docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
 
 all: build/$(MAIN).tap
 
@@ -632,20 +640,25 @@ run: build/$(MAIN).tap
 	cd $(ORICUTRON_HOME) && \
 	    $(EMUL) $(EMUFLAG) "$(CURDIR)/build/$(MAIN).tap"
 
-# Launch the build-chain regression test (src/buildtest.c) visually in
+# Launch the real demo (build/$(MAIN).tap, tape/LOCI target) visually in
 # Phosphoric instead of Oricutron (fast-loads the tape, auto-runs, and
-# mounts tests/fixtures as the LOCI flash root so pt3_load()'s "music.pt3"/
-# "music_effects.pt3" resolve, same as the headless test targets below).
-# This is buildtest, not the real demo (build/$(MAIN).tap) -- the real demo
-# no longer touches LOCI at all, so Oricutron ('make run', which also gives
-# real AY audio unlike Phosphoric) is the right tool for it; buildtest is
-# the one thing that still needs Phosphoric's LOCI emulation to verify.
+# mounts assets/ as the LOCI flash root so pt3_load()'s "oxygene4.pt3"
+# resolves). Phosphoric DOES emulate real AY audio -- this is just as valid
+# a way to see/hear the real demo as Oricutron's own 'make run'.
 # Needs PHOSDIR in .env -- see check-phosphoric. Not headless: opens a real
 # emulator window; close it or Ctrl+C in the terminal to quit. Requires the
 # oric1-emu binary itself to have been built with 'make SDL2=1' in the
 # Phosphoric checkout -- a headless-only build opens no window and gives no
 # error about it.
-run-phos: check-phosphoric build/$(MAIN_BUILDTEST).tap
+run-phos: check-phosphoric build/$(MAIN).tap
+	$(PHOS) -r $(ATMOSROM) \
+	    -t build/$(MAIN).tap -f --loci-flash assets
+
+# Launch the build-chain/LOCI regression test (src/buildtest.c) visually in
+# Phosphoric -- the smoke-test equivalent of 'run-phos' above, exercising
+# LOCI/IJK detection and the PT3 decode-correctness fixtures
+# (tests/fixtures/music.pt3/music_effects.pt3), not the real demo.
+run-phos-buildtest: check-phosphoric build/$(MAIN_BUILDTEST).tap
 	$(PHOS) -r $(ATMOSROM) \
 	    -t build/$(MAIN_BUILDTEST).tap -f --loci-flash tests/fixtures
 

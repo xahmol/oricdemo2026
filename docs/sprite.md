@@ -64,7 +64,7 @@ sprite of any real size (e.g. `src/section_bird.c`'s 66×64 walking bird was
 originally built on `HiresSprite` and was unusably slow — see git history).
 
 ```c
-typedef enum { HXSPR_XOR, HXSPR_OR } HxsprMode;
+typedef enum { HXSPR_XOR, HXSPR_OR, HXSPR_OR_SPARSE } HxsprMode;
 
 typedef struct {
     bool    enabled;
@@ -73,9 +73,11 @@ typedef struct {
 } HxsprColor;
 
 void hxspr_draw (const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes, uint8_t h,
-                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color);
+                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color,
+                  uint8_t *color_backup);
 void hxspr_erase(const HiresBitmap *screen, const uint8_t *image, uint8_t w_bytes, uint8_t h,
-                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color);
+                  uint8_t col, uint8_t y, HxsprMode mode, uint8_t *backup, const HxsprColor *color,
+                  uint8_t *color_backup);
 ```
 
 Operates on a tightly-packed image (`w_bytes * h` bytes, one byte per 6
@@ -95,11 +97,11 @@ was last drawn, which restores the screen exactly. Usage pattern for an
 animated, moving sprite:
 
 ```c
-hxspr_draw (&screen, frame_ptr, w_bytes, h, col, y, HXSPR_XOR, NULL, NULL);   // draw
+hxspr_draw (&screen, frame_ptr, w_bytes, h, col, y, HXSPR_XOR, NULL, NULL, NULL);   // draw
 // ... later, before moving or switching frame:
-hxspr_erase(&screen, frame_ptr, w_bytes, h, col, y, HXSPR_XOR, NULL, NULL);   // undo -- SAME args
+hxspr_erase(&screen, frame_ptr, w_bytes, h, col, y, HXSPR_XOR, NULL, NULL, NULL);   // undo -- SAME args
 col = new_col; frame_ptr = next_frame_ptr;
-hxspr_draw (&screen, frame_ptr, w_bytes, h, col, y, HXSPR_XOR, NULL, NULL);   // draw new frame/position
+hxspr_draw (&screen, frame_ptr, w_bytes, h, col, y, HXSPR_XOR, NULL, NULL, NULL);   // draw new frame/position
 ```
 
 XOR only looks correct if you always undo the exact same image/position
@@ -114,11 +116,37 @@ byte-exact regardless of what's underneath — more robust than XOR (no
 "must match the last draw exactly" constraint), at the cost of that extra
 buffer (same size as the image).
 
-Neither mode is truly opaque: both only touch screen bits where the
-sprite's own bit is 1 — wherever the sprite is "off", the background shows
-straight through untouched. A genuinely opaque fast sprite (full rect
-replace, like `HiresSprite` but byte-aligned) isn't built here — would need
-a third mode, not built because nothing has needed it yet.
+**`HXSPR_OR_SPARSE`** — identical to `HXSPR_OR`, except any image byte
+whose value is EXACTLY `0xFF` (never a real pixel byte — only bits 0-5 are
+ever meaningful, so real data never exceeds `0x7F`) means "leave this byte
+completely alone": no read, no write, no `backup` save/restore for that
+one column of that one row. Unlike plain `HXSPR_OR`, `hxspr_erase()` DOES
+need `image` for this mode (to know which bytes to skip) — pass the same
+image used for the matching draw, same as `HXSPR_XOR`.
+
+Why this exists: plain `HXSPR_OR`'s `dst[i] = dst[i] | (image[i] & 0x3F) |
+0x40` still forces bit6=1 even for an all-zero image byte — harmless for
+real pixel data (bit6 is always 1 there anyway) but corrupts a genuine
+ATTRIBUTE byte (bit6=0 — see [oric.md](oric.md)'s `(byte&0x60)==0` rule,
+e.g. a background element's own ink-attribute byte) if the sprite's body
+ever crosses one. `src/section_bird.c`'s bird flying over
+`section_background.c`'s tree ink-brackets is a real, confirmed case of
+this: even with plain `HXSPR_OR`'s byte-exact backup/restore, the tree's
+attribute byte was visibly wrong (garbled colour) for as many ticks as the
+sprite's body kept overlapping that one column, before being correctly
+restored once the sprite moved past. `HXSPR_OR_SPARSE` fixes this at the
+source: mark that one column `0xFF` in a per-tick modified copy of the
+frame data (see `section_bird.c`'s `bird_prepare_frame()`) and this mode
+skips it entirely, leaving the attribute byte genuinely untouched — at the
+cost of a narrow, correctly-shaped "hole" in the sprite's own silhouette
+at that exact column for as long as the overlap lasts.
+
+Neither `HXSPR_XOR` nor plain `HXSPR_OR` are truly opaque: both only touch
+screen bits where the sprite's own bit is 1 — wherever the sprite is
+"off", the background shows straight through untouched. A genuinely opaque
+fast sprite (full rect replace, like `HiresSprite` but byte-aligned) isn't
+built here — would need a fourth mode, not built because nothing has
+needed it yet.
 
 ### Colour (`HxsprColor`)
 
@@ -136,21 +164,34 @@ immediately after** the image (`col+w_bytes`, set to `color->restore_ink`
 occupies while drawn (attribute bytes are per-scanline, so this repeats
 every row, not just once).
 
-`hxspr_erase()` reverts **both** bracket columns to ordinary blank pixel
-data (`0x40`), not to an ink attribute — this matters for a *moving*
-sprite: it visits many different columns over its lifetime, and leaving a
-past position's bracket as a permanent attribute byte would steal that
-column from the background bitmap forever (an attribute byte never shows
-pixel content again, no matter what's drawn there later). This assumes the
-background under the bracket columns is blank — true for this demo's
-current blank canvas. A sprite moving colour-bracketed over *real*
-background art at those exact columns would need actual save/restore of
-those 2 bytes instead of a hardcoded blank, which isn't built here (not
-needed yet). This was a real bug caught during development: the first
-version restored to `restore_ink` (an attribute byte) instead of blank
-pixel data, which — for a sprite moving across ~28 different column
-positions — permanently converted a growing swath of the row into
-stuck attribute bytes, visible as spurious vertical colour banding.
+`hxspr_erase()` reverts **both** bracket columns to their real saved bytes,
+via the caller-owned `color_backup` buffer (`2*h` bytes: `[left, right]`
+per row) — `hxspr_draw()` saves whatever was really there (pixel data or
+another attribute byte) before overwriting it with `color->ink`/
+`restore_ink`, and `hxspr_erase()` writes those exact bytes back. This
+matters for a *moving* sprite that crosses real background art at the
+bracket columns (e.g. `src/section_bird.c`'s bird dipping low enough to
+overlap `section_background.c`'s trees) — without a real save/restore, a
+past position's bracket write would otherwise be lost forever the moment
+something else got drawn there.
+
+Pass `color_backup` as `NULL` only if the background under **both**
+bracket columns is guaranteed blank for the sprite's entire range of
+travel — `hxspr_erase()` then falls back to hardcoding both columns back
+to blank pixel data (`0x40`), matching this function's original behaviour.
+That fallback was in fact the ONLY behaviour built here initially, on the
+(false, in general) assumption that the whole screen was and would always
+stay blank outside the sprite itself — it silently erased any real
+background pixel content the sprite ever flew over, a real bug caught once
+`section_background.c` grew actual art (trees) under the bird's flight
+path, fixed by adding the `color_backup` save/restore above. (An earlier,
+separate bug during this feature's original development had the opposite
+problem — restoring to `restore_ink`, an attribute byte, instead of blank
+pixel data, which for a sprite moving across ~28 different column
+positions permanently converted a growing swath of the row into stuck
+attribute bytes, visible as spurious vertical colour banding. Both bugs
+are about the same underlying tension: bracket columns are shared,
+mutable state, not sprite-private memory.)
 
 **This only handles INK, not PAPER** — PAPER is assumed constant across the
 whole screen (set once, e.g. via a `hires_row_colors()` sweep over every

@@ -279,6 +279,31 @@ int main(void)
         // again before the program halts).
     }
 
+    // hxspr_draw/erase colour-bracket save/restore test, row 190: proves
+    // hxspr_erase() restores the REAL bytes that were at both bracket
+    // columns (col-1, col+w_bytes) via color_backup, NOT a hardcoded blank
+    // -- a real, confirmed bug fixed by this same change (see
+    // docs/sprite.md's "Colour" section): a sprite flying low enough to
+    // overlap real background art (e.g. src/section_bird.c's bird over
+    // section_background.c's trees) used to permanently erase that art,
+    // because the old hxspr_erase() unconditionally wrote 0x40 to both
+    // bracket columns regardless of what was really there. 0x7A/0x6B are
+    // arbitrary non-blank "background art" stand-ins -- neither equals
+    // 0x40, so seeing them survive the draw+erase round trip is conclusive.
+    {
+        static const uint8_t hximg[2] = { 0x3F, 0x3F };   // 2 column-bytes, all pixels set
+        static uint8_t color_backup[2];
+        HxsprColor color = { true, A_FWBLACK, A_FWWHITE };
+
+        *(volatile uint8_t *)(HIRESVRAM + (uint16_t)190 * HIRES_ROW_BYTES + 9)  = 0x7A;
+        *(volatile uint8_t *)(HIRESVRAM + (uint16_t)190 * HIRES_ROW_BYTES + 12) = 0x6B;
+
+        hxspr_draw(&hb, hximg, 2, 1, 10, 190, HXSPR_XOR, (uint8_t *)0, &color, color_backup);
+        hxspr_erase(&hb, hximg, 2, 1, 10, 190, HXSPR_XOR, (uint8_t *)0, &color, color_backup);
+        // After erase: row190 col9/col12 should read back 0x7a/0x6b exactly,
+        // left in place at their own addresses for the final RAM dump.
+    }
+
     // hires_row_colors_range test: rows 175-179 stride 2 -> attributes
     // applied to 175/177/179 only, skipping 176/178. Sentinel value 0xAA
     // poked into the skipped rows first, to prove they're genuinely

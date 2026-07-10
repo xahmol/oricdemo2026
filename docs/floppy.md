@@ -410,8 +410,10 @@ worth knowing if this code is touched again:
   instead of a conditional fallthrough that could reach the
   `l_bytes_lo`-zeroing path from the wrong branch) — see
   `tools/floppy/loader.c`'s `sector_ok` comment for the full trace. Now
-  correctly reads `0x3C` on both targets; `tests/scripts/test_disk.sh`
-  asserts the corrected value.
+  correctly reads the same value on both targets (`0x3C` at the time this
+  bug was fixed; later `0x24` once a separate, unrelated `pt3.c` mixer-bit
+  bug was fixed too -- see `docs/pt3.md`'s Verification section);
+  `tests/scripts/test_disk.sh` asserts the current corrected value.
 - **`tools/floppy/loader.c`'s boot handoff must jump to the runtime's
   `startup` region (`$0500`), not straight into `main()` (`$0580`).** The
   Makefile must pass `-dDEMO_ADDRESS=0x0500` to every `loader.c` compile —

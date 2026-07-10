@@ -27,6 +27,45 @@ static const uint16_t PT3_NOTE_TABLE[96] = {
     15,   14,   14,   12,   12,   11,   11,   10,   10,   9,    8,    8,
 };
 
+// AY volume/amplitude combine table -- ppt3.s's own VolTableCreator
+// (c) Ivan Roshin, precisely re-derived by simulating its 6502 fixed-point
+// generation algorithm in Python (not guessed, and not the same as a
+// simple multiply): index = (channel_volume << 4) | sample_amplitude_nibble
+// (both 0-15), giving the exact AY volume register value (0-15) for that
+// combination, for the "version>=5" table variant (VTII1.0/3.5x/3.6x --
+// this project's own Vortex Tracker II-format modules). Replaces an
+// earlier, documented "simplified scope cut" (a plain
+// `(volume*(amplitude+1))>>4` linear combine) that measurably
+// under-represented most combinations (~15-18% quieter on average across
+// all 256 combinations) versus this real table -- a real, confirmed
+// contributor to a "volume sounds too low throughout" complaint. The one
+// value the simulation produced as 16 (index 255, channel_volume=15 AND
+// sample_amplitude=15, the single loudest combination) is clamped to 15
+// here -- the AY volume register is only 4 bits wide, so an unclamped 16
+// would wrap to 0 (dead silence) at the exact loudest combination, almost
+// certainly not the reference's real intent (every neighbouring entry
+// stays within 0-15; this is the only overshoot, consistent with a minor
+// rounding-edge artifact in either the original 6502 fixed-point algorithm
+// or this simulation of it, not a deliberate wraparound).
+static const uint8_t PT3_VOLUME_TABLE[256] = {
+      0,   0,   0,   0,   0,   0,   0,   0,   1,   1,   1,   1,   1,   1,   1,   1,
+      0,   0,   0,   0,   1,   1,   1,   1,   1,   1,   1,   1,   2,   2,   2,   2,
+      0,   0,   0,   1,   1,   1,   1,   1,   2,   2,   2,   2,   2,   3,   3,   3,
+      0,   0,   1,   1,   1,   1,   2,   2,   2,   2,   3,   3,   3,   3,   4,   4,
+      0,   0,   1,   1,   1,   2,   2,   2,   3,   3,   3,   4,   4,   4,   5,   5,
+      0,   0,   1,   1,   2,   2,   2,   3,   3,   4,   4,   4,   5,   5,   6,   6,
+      0,   0,   1,   1,   2,   2,   3,   3,   4,   4,   5,   5,   6,   6,   7,   7,
+      0,   1,   1,   2,   2,   3,   3,   4,   4,   5,   5,   6,   6,   7,   7,   8,
+      0,   1,   1,   2,   2,   3,   4,   4,   5,   5,   6,   7,   7,   8,   8,   9,
+      0,   1,   1,   2,   3,   3,   4,   5,   5,   6,   7,   7,   8,   9,   9,  10,
+      0,   1,   1,   2,   3,   4,   4,   5,   6,   7,   7,   8,   9,   9,  10,  11,
+      0,   1,   2,   2,   3,   4,   5,   6,   6,   7,   8,   9,  10,  10,  11,  12,
+      0,   1,   2,   3,   3,   4,   5,   6,   7,   8,   9,   9,  10,  11,  12,  13,
+      0,   1,   2,   3,   4,   5,   6,   7,   7,   8,   9,  10,  11,  12,  13,  14,
+      0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
+      0,   1,   2,   3,   4,   5,   6,   7,   9,  10,  11,  12,  13,  14,  15,  15,
+};
+
 // Module header offsets (relative to the module's own load address, i.e.
 // offset 0 of pt3_module[]) -- traced precisely from ppt3.s's INIT routine.
 #define PT3_OFF_DELAY         100   // tempo, ticks/row
@@ -50,7 +89,21 @@ typedef struct {
     uint8_t  sample_num;                 // selected sample index, 0-31
     uint16_t sample_pos;                   // current step index within the sample
     int16_t  tone_acc;                      // accumulated sample-driven tone delta
-    bool     noise_enabled;                  // this channel has set a noise period (stays on)
+    int8_t   amp_slide;                      // CrAmSl: persistent per-channel amplitude offset
+                                               // (-15..+15), accumulated +/-1 per tick whenever the
+                                               // CURRENT sample step's mixflags bit7 is set (bit6
+                                               // picks direction) -- NOT reset between steps, so a
+                                               // run of same-direction steps creates a genuine
+                                               // fade-in/fade-out ramp on top of each step's own
+                                               // raw amplitude nibble. See pt3_channel_tick()'s own
+                                               // comment for why this isn't just a subtlety: a
+                                               // sample relying on this to reach its own peak
+                                               // amplitude stayed stuck near its low starting value
+                                               // without it -- a real, confirmed contributor to a
+                                               // "channel stays quiet throughout" complaint,
+                                               // distinct from (and on top of) the sample-select
+                                               // byte-offset bug and the linear-vs-real volume
+                                               // table, both already fixed elsewhere in this file.
     bool     env_enabled;                     // this channel's amplitude uses the shared envelope
 
     // Portamento/glissando (shared tone-slide mechanism -- CrTnSl in ppt3.s)
@@ -194,7 +247,7 @@ void pt3_init(void)
         pt3_chan[i].sample_num = 0;
         pt3_chan[i].sample_pos = 0;
         pt3_chan[i].tone_acc = 0;
-        pt3_chan[i].noise_enabled = false;
+        pt3_chan[i].amp_slide = 0;
         pt3_chan[i].env_enabled = false;
         pt3_chan[i].slide_active = false;
         pt3_chan[i].slide_delay = 0;
@@ -368,6 +421,16 @@ static bool pt3_decode_command(Pt3Channel *chan)
       // means NO envelope period follows (matches ppt3.s's PD_ESAM, which
       // branches around SETENV entirely when z80_A==0); shape!=0 reads a
       // 16-bit period from the next 2 stream bytes first.
+      //
+      // The sample stream byte here is NOT a plain sample index -- same
+      // real, confirmed bug as the 0xF0-0xFF handler below (see its own
+      // comment for the full story): ppt3.s's PD_ESAM reads this byte and
+      // jumps DIRECTLY to PD_SAM_ (`sta z80_E`) with NO transformation at
+      // all -- meaning the byte already IS the byte OFFSET (index*2) into
+      // the sample-pointer table, not a plain 0-31 index. Halving it here
+      // (with a defensive bit0-mask first, cheap and a no-op for any
+      // well-formed even value) keeps sample_num's stored meaning
+      // consistent with every other assignment in this function.
         uint8_t shape = (uint8_t)(cmd - 0x10);
         chan->env_enabled = (shape != 0);
         if (shape != 0)
@@ -376,16 +439,21 @@ static bool pt3_decode_command(Pt3Channel *chan)
             pt3_env_period = pt3_word_le(chan->stream_pos);
             chan->stream_pos = (uint16_t)(chan->stream_pos + 2);
         }
-        chan->sample_num = pt3_byte(chan->stream_pos);
+        chan->sample_num = (uint8_t)((pt3_byte(chan->stream_pos) & 0xFE) >> 1);
         chan->stream_pos = (uint16_t)(chan->stream_pos + 1);
         chan->sample_pos = 0;
         return false;
     }
 
     if (cmd <= 0x3F)
-    { // noise period (0-31)
+    { // noise period (0-31) -- ppt3.s's PD_NOIS is just `sta Ns_Base`, the
+      // SHARED noise-period register (AY has only one noise generator).
+      // This does NOT enable noise for the issuing channel -- that used to
+      // be a real, confirmed bug here (see pt3_channel_tick()'s own comment
+      // on sam_flags bit7 for where per-channel noise enable actually comes
+      // from: the CURRENT sample step, fresh every tick, not a permanent
+      // latch set by this command).
         pt3_noise_period = (uint16_t)(cmd - 0x20);
-        chan->noise_enabled = true;
         return false;
     }
 
@@ -458,6 +526,13 @@ static bool pt3_decode_command(Pt3Channel *chan)
         // played back as unpitched noise instead of the tune's actual
         // melody (not reproduced by only checking a handful of ticks).
         chan->tone_acc = 0;
+        // A freshly struck note also resets the persistent amplitude-slide
+        // accumulator (CrAmSl, see amp_slide's own comment) -- matches
+        // ppt3.s's PD_RES, which zeroes a whole block of per-channel state
+        // (including CrAmSl's own offset) on every fresh note. Without
+        // this, a slide accumulated during a PREVIOUS note would carry
+        // into the new one, biasing its amplitude for no musical reason.
+        chan->amp_slide = 0;
         chan->enabled = true;
         return true;
     }
@@ -512,10 +587,32 @@ static bool pt3_decode_command(Pt3Channel *chan)
         return false;
     }
 
-    // cmd 0xF0-0xFF: ornament select (0-15) + sample select
+    // cmd 0xF0-0xFF: ornament select (0-15) + sample select. The stream
+    // byte here is NOT a plain sample index (unlike the 0xD1-0xEF/0xB2-0xBF
+    // paths above, which store cmd-0xD0/val-1 directly as a 0-31 index) --
+    // ppt3.s's PD_OrSm reads it and does `lsr a; bcc +; ora #$80; +: asl a`
+    // before using it as `z80_E` (the byte OFFSET into the sample-pointer
+    // table). That LSR/OR/ASL sequence nets out to "clear bit0" (a defence
+    // against a malformed odd byte) -- it does NOT double the value like
+    // PD_SAM's own single `asl a` does for the OTHER sample-select
+    // commands. So this byte already IS index*2 (a byte offset), not a
+    // plain index -- half it here (masking bit0 first, matching the
+    // reference's own defensive clear) to get back a plain 0-31 index
+    // consistent with every other sample_num assignment in this function.
+    // A real, confirmed bug lived here: treating the raw byte AS the index
+    // (then doubling it again at the sam_data lookup, see
+    // pt3_channel_tick()) silently read the WRONG sample-pointer-table
+    // slot for every combined orn+sample command in the real song -- e.g.
+    // a stream byte of 18 (meaning index 9, a real, defined sample) was
+    // being read as index 18 instead, an UNDEFINED slot in
+    // assets/oxygene4.pt3's own sample-pointer table, permanently
+    // silencing the channel (see pt3_channel_tick()'s sam_data==0
+    // handling) for as long as it kept using this command -- one whole
+    // channel completely silent for the entire song, not a subtle
+    // loudness difference.
     pt3_set_ornament(chan, (uint8_t)(cmd - 0xF0));
     chan->env_enabled = false;
-    chan->sample_num = pt3_byte(chan->stream_pos);
+    chan->sample_num = (uint8_t)((pt3_byte(chan->stream_pos) & 0xFE) >> 1);
     chan->stream_pos = (uint16_t)(chan->stream_pos + 1);
     chan->sample_pos = 0;
     return false;
@@ -652,19 +749,22 @@ static void pt3_channel_tick(Pt3Channel *chan, uint16_t *out_tone, uint8_t *out_
     sam_data = pt3_word_le((uint16_t)(PT3_OFF_SAMPLES + (uint16_t)chan->sample_num * 2));
     if (sam_data == 0)
     {
-        // sam_data==0 means chan->sample_num selected an UNDEFINED slot in
-        // the sample-pointer table (offset 0 is always the PT3 file's own
-        // header, never a real sample -- see project memory
-        // project_pt3_sample_select_bug for the investigation that found
-        // this: an as-yet-unidentified upstream stream-decode bug lands a
-        // channel on sample_num=30 in the real Oxygene4.pt3 module, which
-        // has no sample defined there). Reading step data from byte 0
-        // decodes the header as if it were amplitude/mixflags/delta
-        // bytes, producing huge nonsense tone-period swings that clamp at
-        // the AY's 0/4095 extremes -- audible as unpitched noise instead
-        // of the tune's actual melody. Silencing the channel for this
-        // tick is a pragmatic mitigation, not a root-cause fix: better to
-        // drop a note than to play garbage.
+        // sam_data==0 means chan->sample_num selected a genuinely
+        // UNDEFINED slot in the sample-pointer table (offset 0 is always
+        // the PT3 file's own header, never a real sample). This DOES
+        // happen legitimately for hand-crafted/edge-case modules, or if a
+        // module simply never defines every one of the 32 possible sample
+        // slots -- see project memory project_pt3_sample_select_bug for a
+        // real case that used to trigger this mitigation on effectively
+        // every tick of an entire channel (a genuine decode bug reading
+        // the wrong slot, since fixed, not a property of the module
+        // itself). Reading step data from byte 0 would decode the header
+        // as if it were amplitude/mixflags/delta bytes, producing huge
+        // nonsense tone-period swings that clamp at the AY's 0/4095
+        // extremes -- audible as unpitched noise instead of the tune's
+        // actual melody. Silencing the channel for this tick is a
+        // pragmatic mitigation, not a root-cause fix: better to drop a
+        // note than to play garbage.
         sam_flags = 0;
         sam_mixflags = 0;
         sam_delta = 0;
@@ -701,15 +801,101 @@ static void pt3_channel_tick(Pt3Channel *chan, uint16_t *out_tone, uint8_t *out_
     if (tone_total > 4095) tone_total = 4095;
     *out_tone = (uint16_t)tone_total;
 
-    amplitude = sam_flags & 0x0F;
-    // Simplified, documented scope cut: linear volume/amplitude combine
-    // (channel volume 0-15 scaled by the sample step's own amplitude
-    // nibble) rather than replicating ppt3.s's VolTableCreator table or
-    // its CrAmSl amplitude-slide-from-sample-flags mechanism.
-    *out_amplitude = (uint8_t)(((uint16_t)chan->volume * (amplitude + 1)) >> 4);
+    // CrAmSl: a PERSISTENT per-channel amplitude offset (-15..+15), NOT
+    // reset between ticks (only on a fresh note strike -- see
+    // pt3_decode_command()'s cmd<=0xAF handler), accumulated +/-1 per tick
+    // whenever the CURRENT sample step's OWN flags byte (sam_flags) has
+    // bit7 set (bit6 then picks direction: 1=up, 0=down), clamped at +/-15
+    // by simply not incrementing/decrementing further once there (matching
+    // ppt3.s's own CH_AMP: `cmp #15/beq CH_NOAM` and `cmp #$F1/beq
+    // CH_NOAM`).
+    if (sam_flags & 0x80)
+    {
+        if (sam_flags & 0x40)
+        {
+            if (chan->amp_slide != 15)
+                chan->amp_slide++;
+        }
+        else
+        {
+            if (chan->amp_slide != -15)
+                chan->amp_slide--;
+        }
+    }
+    // A real, confirmed bug lived here: the raw amplitude nibble added to
+    // CrAmSl was read from `sam_flags & 0x0F` (the step's FIRST byte).
+    // Fetching ppt3.s directly and tracing CH_NOAM precisely shows the
+    // nibble actually comes from `z80_B` -- the step's SECOND byte, this
+    // project's `sam_mixflags` -- via `lda z80_B / and #15 / adc z80_L`
+    // (z80_L holding CrAmSl). `z80_C` (sam_flags) supplies ONLY CH_AMP's
+    // slide enable/direction bits (bit7/bit6, above); its own low nibble is
+    // never read as an amplitude value anywhere in ppt3.s. Verified against
+    // assets/oxygene4.pt3's own sample 15 (a single-step noise/percussion
+    // sample): flags=0x01, mixflags=0x1F -- the old code read amplitude=1
+    // (near-silent at any channel volume, since PT3_VOLUME_TABLE's low-
+    // amplitude columns stay near 0 regardless of the volume row), while
+    // the corrected byte gives amplitude=15 (full-scale, scaling properly
+    // with channel volume) -- a real, confirmed, direct cause of "overall
+    // volume stays low throughout the song" affecting every sample in the
+    // module, not just this one.
+    {
+        int16_t combined = (int16_t)(sam_mixflags & 0x0F) + chan->amp_slide;
+        if (combined < 0) combined = 0;
+        if (combined > 15) combined = 15;
+        amplitude = (uint8_t)combined;
+    }
+    // PT3_VOLUME_TABLE lookup (see its own comment) -- NOT a linear combine.
+    *out_amplitude = PT3_VOLUME_TABLE[((uint16_t)chan->volume << 4) | amplitude];
 
-    *out_tone_on = chan->vibrato_audible;
-    *out_noise_on = chan->noise_enabled;
+    // Tone/noise mixer-enable bits come from the CURRENT sample step's own
+    // sam_MIXFLAGS byte (bit4 = tone mask, bit7 = noise mask, both
+    // active-low like the AY mixer register itself), evaluated FRESH every
+    // tick -- NOT a permanent per-channel latch. A real, confirmed bug
+    // lived here twice: first (see project memory
+    // project_pt3_sample_select_bug) a per-channel `noise_enabled` flag
+    // was set true and never reset the first time ANY row used the
+    // noise-period-select command; then, after fixing that, this code
+    // read the mask bits from `sam_flags` instead of `sam_mixflags` --
+    // ppt3.s's own step-byte-loading code (right before CH_NOAC/CH_AMP)
+    // proves the two bytes' real roles precisely: `z80_C` (loaded from the
+    // step's FIRST byte) supplies CH_AMP's amplitude-slide enable/
+    // direction bits, while `z80_B` (loaded from the step's SECOND byte)
+    // supplies BOTH the tone_acc "accumulate" flag (bit6, tested at
+    // CH_NOAC) AND CH_MIX's own tone/noise mask bits (bit4/bit7) -- i.e.
+    // `z80_B` is this project's `sam_mixflags`, `z80_C` is `sam_flags`,
+    // the OPPOSITE of what an earlier draft assumed. The bit-position/
+    // channel-order derivation itself (simulating ppt3.s's own
+    // incremental mixer-accumulation, CH_MIX/CH_EXIT, against the AY's
+    // real bit0-2=tone/bit3-5=noise layout, confirming A,B,C channel
+    // order is the only combination that reproduces it) was already
+    // correct -- only WHICH byte supplied the two bits was wrong. Audible
+    // effect of getting this backwards: a channel dominated by noise
+    // instead of its intended clean tone (e.g. a bassline built on the
+    // "envelope bass" technique, which pairs enveloped tone with the noise
+    // generator switched off almost all the time, not on permanently).
+    *out_tone_on = chan->vibrato_audible && ((sam_mixflags & 0x10) == 0);
+    *out_noise_on = (sam_mixflags & 0x80) == 0;
+}
+
+// Writes `value` to AY register `reg` only if it actually changed since
+// the last tick (per pt3_ay_shadow[], already kept up to date for
+// test/inspection -- see pt3.h's own comment on pt3_debug_shadow()) --
+// ay_write() itself is a fixed-cost handful of VIA/PCR writes plus a
+// PHP/SEI/PLP pair every single call, and pt3_tick() used to call it for
+// all 13 non-shape registers unconditionally every tick regardless of
+// whether the value had moved -- most ticks change only a few of them
+// (e.g. the shared envelope period/noise period, or a channel's own
+// coarse tone byte, often go several ticks between changes). Skipping the
+// unchanged ones is a straightforward, safe win: __interrupt-context CPU
+// time saved here is time NOT stolen from the main loop's own animation
+// work every tick, 50 times a second.
+static void pt3_ay_write_if_changed(uint8_t reg, uint8_t value)
+{
+    if (pt3_ay_shadow[reg] != value)
+    {
+        ay_write(reg, value);
+        pt3_ay_shadow[reg] = value;
+    }
 }
 
 __interrupt void pt3_tick(void)
@@ -760,43 +946,35 @@ __interrupt void pt3_tick(void)
             mixer &= (uint8_t)~(8 << i);
     }
 
-    ay_write(AY_REG_TONE_A_LO, (uint8_t)(tone[0] & 0xFF));
-    ay_write(AY_REG_TONE_A_HI, (uint8_t)((tone[0] >> 8) & 0x0F));
-    ay_write(AY_REG_TONE_B_LO, (uint8_t)(tone[1] & 0xFF));
-    ay_write(AY_REG_TONE_B_HI, (uint8_t)((tone[1] >> 8) & 0x0F));
-    ay_write(AY_REG_TONE_C_LO, (uint8_t)(tone[2] & 0xFF));
-    ay_write(AY_REG_TONE_C_HI, (uint8_t)((tone[2] >> 8) & 0x0F));
-    ay_write(AY_REG_NOISE, (uint8_t)(pt3_noise_period & 0x1F));
-    ay_write(AY_REG_MIXER, mixer);
-    ay_write(AY_REG_VOL_A, (uint8_t)(ampl[0] | (pt3_chan[0].env_enabled ? 0x10 : 0)));
-    ay_write(AY_REG_VOL_B, (uint8_t)(ampl[1] | (pt3_chan[1].env_enabled ? 0x10 : 0)));
-    ay_write(AY_REG_VOL_C, (uint8_t)(ampl[2] | (pt3_chan[2].env_enabled ? 0x10 : 0)));
-    ay_write(AY_REG_ENV_LO, (uint8_t)(pt3_env_period & 0xFF));
-    ay_write(AY_REG_ENV_HI, (uint8_t)((pt3_env_period >> 8) & 0xFF));
+    pt3_ay_write_if_changed(AY_REG_TONE_A_LO, (uint8_t)(tone[0] & 0xFF));
+    pt3_ay_write_if_changed(AY_REG_TONE_A_HI, (uint8_t)((tone[0] >> 8) & 0x0F));
+    pt3_ay_write_if_changed(AY_REG_TONE_B_LO, (uint8_t)(tone[1] & 0xFF));
+    pt3_ay_write_if_changed(AY_REG_TONE_B_HI, (uint8_t)((tone[1] >> 8) & 0x0F));
+    pt3_ay_write_if_changed(AY_REG_TONE_C_LO, (uint8_t)(tone[2] & 0xFF));
+    pt3_ay_write_if_changed(AY_REG_TONE_C_HI, (uint8_t)((tone[2] >> 8) & 0x0F));
+    pt3_ay_write_if_changed(AY_REG_NOISE, (uint8_t)(pt3_noise_period & 0x1F));
+    pt3_ay_write_if_changed(AY_REG_MIXER, mixer);
+    pt3_ay_write_if_changed(AY_REG_VOL_A, (uint8_t)(ampl[0] | (pt3_chan[0].env_enabled ? 0x10 : 0)));
+    pt3_ay_write_if_changed(AY_REG_VOL_B, (uint8_t)(ampl[1] | (pt3_chan[1].env_enabled ? 0x10 : 0)));
+    pt3_ay_write_if_changed(AY_REG_VOL_C, (uint8_t)(ampl[2] | (pt3_chan[2].env_enabled ? 0x10 : 0)));
+    pt3_ay_write_if_changed(AY_REG_ENV_LO, (uint8_t)(pt3_env_period & 0xFF));
+    pt3_ay_write_if_changed(AY_REG_ENV_HI, (uint8_t)((pt3_env_period >> 8) & 0xFF));
     // Envelope shape: only written when a command explicitly set a new one
     // this tick (0xFF sentinel = "nothing to write") -- writing it every
     // tick would restart the AY envelope generator on every single tick,
-    // per ppt3.s's ROUT (its "shunte R13 si $FF" gate).
+    // per ppt3.s's ROUT (its "shunte R13 si $FF" gate). Deliberately NOT
+    // routed through pt3_ay_write_if_changed(): this register must be
+    // skipped based on "did a command set a new shape this tick", not
+    // "does the shape value differ from last time" (a shape command can
+    // legitimately re-select the SAME shape to restart the envelope on
+    // purpose -- collapsing that into a same-value no-write would silently
+    // drop an intentional envelope restart).
     if (pt3_env_shape != 0xFF)
     {
         ay_write(AY_REG_ENV_SHAPE, pt3_env_shape);
         pt3_ay_shadow[13] = pt3_env_shape;
         pt3_env_shape = 0xFF;
     }
-
-    pt3_ay_shadow[0] = (uint8_t)(tone[0] & 0xFF);
-    pt3_ay_shadow[1] = (uint8_t)((tone[0] >> 8) & 0x0F);
-    pt3_ay_shadow[2] = (uint8_t)(tone[1] & 0xFF);
-    pt3_ay_shadow[3] = (uint8_t)((tone[1] >> 8) & 0x0F);
-    pt3_ay_shadow[4] = (uint8_t)(tone[2] & 0xFF);
-    pt3_ay_shadow[5] = (uint8_t)((tone[2] >> 8) & 0x0F);
-    pt3_ay_shadow[6] = (uint8_t)(pt3_noise_period & 0x1F);
-    pt3_ay_shadow[7] = mixer;
-    pt3_ay_shadow[8] = (uint8_t)(ampl[0] | (pt3_chan[0].env_enabled ? 0x10 : 0));
-    pt3_ay_shadow[9] = (uint8_t)(ampl[1] | (pt3_chan[1].env_enabled ? 0x10 : 0));
-    pt3_ay_shadow[10] = (uint8_t)(ampl[2] | (pt3_chan[2].env_enabled ? 0x10 : 0));
-    pt3_ay_shadow[11] = (uint8_t)(pt3_env_period & 0xFF);
-    pt3_ay_shadow[12] = (uint8_t)((pt3_env_period >> 8) & 0xFF);
 }
 
 void pt3_stop(void)

@@ -43,6 +43,27 @@ int main(void)
 {
     hires_init();
 
+    // Background music, started FIRST -- before hb_init/hb_fill/hires_on/
+    // section_background_run below -- so it's audible from the very start
+    // of the demo, not just once the (visually much slower) background/
+    // footer setup below has already finished. Ticks at 50Hz via a raster
+    // IRQ (see docs/pt3.md and docs/rasterirq.md) -- entirely decoupled
+    // from every section's own busy-wait animation timing; once started
+    // here it keeps playing regardless of what any section does
+    // afterward, for the demo's entire run. Silently does nothing if the
+    // music file isn't present (no LOCI device, or running a build where
+    // it wasn't shipped) -- see pt3_load()'s own graceful-failure
+    // behaviour. Has no dependency on the HIRES video setup below (pt3.c/
+    // rasterirq.c only ever touch the AY/VIA registers, never HIRESVRAM),
+    // so nothing is lost by moving it ahead of it.
+    if (pt3_load(MUSIC_FILE))
+    {
+        pt3_init();
+        hrirq_init();
+        hrirq_add(100, pt3_tick);
+        hrirq_start();
+    }
+
     HiresBitmap screen;
     hb_init(&screen, (uint8_t *)HIRESVRAM, HIRES_ROWS);
     hb_fill(&screen, 0x40);   // real RAM isn't zero-initialized -- start blank
@@ -88,21 +109,6 @@ int main(void)
             p[1] = A_BGBLACK;
             memset(p + 2, CH_SPACE, HIRES_ROW_BYTES - 2);
         }
-    }
-
-    // Background music, ticking at 50Hz via a raster IRQ (see docs/pt3.md
-    // and docs/rasterirq.md) -- decoupled from section_bird_run()'s own
-    // busy-wait animation timing entirely; once started here it keeps
-    // playing regardless of what any section does afterward. Silently
-    // does nothing if the music file isn't present (no LOCI device, or
-    // running a build where it wasn't shipped) -- see pt3_load()'s own
-    // graceful-failure behaviour.
-    if (pt3_load(MUSIC_FILE))
-    {
-        pt3_init();
-        hrirq_init();
-        hrirq_add(100, pt3_tick);
-        hrirq_start();
     }
 
     section_clouds_init(&screen);

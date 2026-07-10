@@ -104,17 +104,47 @@ documentation, though it matches it):
 | Range | Meaning |
 |---|---|
 | `0x00-0x0F` | 16 special commands (table below) |
-| `0x10-0x1F` | envelope shape (0-15) + sample select |
+| `0x10-0x1F` | envelope shape (0-15) + sample select (next byte -- see note below) |
 | `0x20-0x3F` | noise period (0-31) |
 | `0x40-0x4F` | ornament select (0-15) |
 | `0x50-0xAF` | note (0-95) — ends the row |
 | `0xB0` | envelope off |
-| `0xB1-0xBF` | sample select (1-15), or (`0xB1` only) row-hold count in the next byte |
+| `0xB1` | row-hold count in the next byte |
+| `0xB2-0xBF` | envelope select (shape 1-14 + 16-bit period, next 2 bytes) |
 | `0xC0` | note release/off — ends the row |
 | `0xC1-0xCF` | volume set (1-15) |
 | `0xD0` | mid-stream "end this row, no note" — ends the row |
 | `0xD1-0xEF` | sample select (1-31) |
-| `0xF0-0xFF` | ornament select (0-15) + sample select |
+| `0xF0-0xFF` | ornament select (0-15) + sample select (next byte -- see note below) |
+
+**A real, confirmed decode bug lived in the two "sample select (next
+byte)" rows above** (`0x10-0x1F` and `0xF0-0xFF`): the stream byte there
+is NOT a plain 0-31 sample index like `0xD1-0xEF`'s own `cmd-0xD0` is —
+`ppt3.s`'s `PD_ESAM` (`0x10-0x1F`'s handler) reads it and jumps straight
+into `PD_SAM_` with no transformation at all, and `PD_OrSm` (`0xF0-0xFF`'s
+handler) reads it, does `lsr a; bcc +; ora #$80; +: asl a` (which nets out
+to just clearing bit0 — a defensive "force even" step, NOT a doubling)
+before falling into the same `PD_SAM_`. Either way, the raw byte already
+IS the byte *offset* into the sample-pointer table (i.e. `index*2`), not a
+plain index that still needs doubling. An earlier draft here stored the
+raw byte directly as `sample_num` (a plain index elsewhere in this code)
+and then doubled it AGAIN at the `sam_data` lookup — silently reading the
+WRONG sample-pointer-table slot for every combined-select command. In the
+real `assets/oxygene4.pt3` module this was catastrophic for one channel:
+its combined orn+sample command always specified byte `18` (meaning index
+`9`, a real, defined sample), but the doubling bug read index `18` instead
+— an UNDEFINED slot in that module's own sample-pointer table — which
+`pt3_channel_tick()`'s `sam_data==0` handling then silences for the tick.
+Since that channel relied on this command throughout, it was **completely
+silent for the entire song**, not just quieter — the other two channels
+also hit undefined slots this way for roughly 10-18% of their own active
+ticks. Fixed by halving the raw byte (`(byte & 0xFE) >> 1`, the mask being
+a cheap, harmless defensive echo of `PD_OrSm`'s own bit0-clear) before
+storing it as `sample_num`, restoring the same "plain index" meaning the
+`0xD1-0xEF` path already had. Verified via a from-scratch Python replica
+of the fixed decode logic run against the real module: 0% undefined-slot
+hits across all three channels over 6000 simulated ticks (previously
+17.7%/9.5%/**100%**).
 
 A **row can carry several of these commands** (e.g. volume, then an
 ornament+sample select, then a note) before it ends — `pt3_decode_row()`
@@ -146,11 +176,76 @@ decrement.
 then step data. The step used for a given tick is read *before* advancing
 (with wraparound to the loop index at the length boundary) — "use old, then
 advance", not "advance, then use." Ornament steps are a signed 1-byte tone
-offset; sample steps are 4 bytes (amplitude/envelope-gate nibble, mix-flags
-byte, 16-bit signed tone delta). The mix-flags byte's bit6 controls whether
-the tone delta *accumulates* into the channel's running total (persists
-across ticks — a gliding/vibrato-via-sample effect) or is applied fresh each
-step without carrying forward.
+offset; sample steps are 4 bytes: a flags byte, a mix-flags byte, and a
+16-bit signed tone delta.
+
+Each sample step's two flag bytes were fetched directly from `ppt3.s`
+(`CH_AMP`/`CH_NOAM`/`CH_MIX`/`CH_EXIT`, the code that loads them into Z80
+registers `z80_C` (first byte) and `z80_B` (second byte)) and their real
+roles are:
+
+The **flags byte** (`sam_flags`, `z80_C`): **bit 7 enables the persistent
+per-channel amplitude slide (`CrAmSl`/`amp_slide`), bit 6 picks its
+direction** (1=up, 0=down) — see "Effects" below for `CrAmSl` itself. Bit 0
+gates a per-step envelope-enable check in `ppt3.s` (`CH_ENV`) that this
+implementation doesn't currently read (envelope is only ever enabled via
+the `0xB2-0xBF` command, not per-sample-step — a real, minor scope gap, not
+yet a reported symptom). This byte's low nibble is **not** an amplitude
+value — see the note below on the amplitude nibble's real source, an
+earlier bug in this exact area.
+
+The **mix-flags byte** (`sam_mixflags`, `z80_B`): **bits 0-3 are the
+amplitude nibble** (0-15, combined with the channel's own volume via
+`PT3_VOLUME_TABLE` — see "What's precisely traced" below); **bit 4 is the
+tone mask, bit 7 is the noise mask for the AY mixer register — both
+active-low (0 = enabled), evaluated fresh every tick from the CURRENT
+step**; **bit 6 controls whether the tone delta *accumulates*** into the
+channel's running total (persists across ticks — a gliding/vibrato-via-
+sample effect) or is applied fresh each step without carrying forward.
+
+**Two real, confirmed bugs have lived in this exact area, at two different
+times:**
+
+1. An earlier draft set a per-channel `noise_enabled` flag to `true` the
+   first time ANY row used the noise-*period*-select command (`0x20-0x3F`,
+   which only sets the AY's single shared noise-period register, `Ns_Base`
+   in `ppt3.s` — it has nothing to do with any one channel's own mixer
+   enable bit) and never reset it, permanently mixing the noise generator
+   into that channel's output for the rest of the song regardless of what
+   the current sample step actually wanted. Fixed by deriving
+   `out_tone_on`/`out_noise_on` fresh every tick from the current step's
+   bit4/bit7 (initially read from the wrong byte, `sam_flags` — see next
+   point — then corrected to `sam_mixflags`, matching `ppt3.s`'s own
+   `CH_MIX`: `lda z80_B / ror a / and #$48`, which rotates `z80_B`'s bit4/
+   bit7 into position before OR-ing them into the shared mixer accumulator;
+   this exact bit-position/channel-order combination, verified by
+   simulating `CH_MIX`/`CH_EXIT`'s incremental construction against the
+   AY's real bit0-2=tone/bit3-5=noise layout, is the only one that
+   reproduces it).
+2. **The amplitude nibble was read from the wrong byte entirely**: an
+   earlier draft (added alongside implementing `CrAmSl`, below) computed it
+   as `sam_flags & 0x0F` — reasoning that since `sam_flags`'s bit7/bit6
+   drive the slide, its low nibble must be the value being slid. Fetching
+   `ppt3.s` directly and reading `CH_NOAM` line-by-line shows this is
+   wrong: `lda z80_B / and #15 / adc z80_L` (`z80_L` holding `CrAmSl`) —
+   the nibble comes from `z80_B` (`sam_mixflags`), the *second* byte, not
+   `z80_C` (`sam_flags`), the first. `sam_flags`'s own low nibble is never
+   read as an amplitude anywhere in `ppt3.s`. Confirmed against
+   `assets/oxygene4.pt3`'s own sample 15 (a single-step noise/percussion
+   sample): `flags=0x01, mixflags=0x1F` — the old code read amplitude=1
+   (near-silent at *any* channel volume, since `PT3_VOLUME_TABLE`'s
+   low-amplitude columns stay near 0 regardless of the volume row) where
+   the corrected byte gives amplitude=15 (full-scale, scaling properly with
+   channel volume). This was a real, confirmed, direct cause of "overall
+   volume stays low throughout the song" — affecting every sample in the
+   module that uses a low nibble in `sam_flags`, not just this one, since
+   the wrong byte was read on every tick, every channel. Fixed by changing
+   the combine to `sam_mixflags & 0x0F`. `tests/fixtures/music.pt3`/
+   `music_effects.pt3`'s own sample 0 had its test amplitude (`0x0F`)
+   hand-placed in the flags byte to match the *old* (wrong) behaviour;
+   both fixtures' sample-0 step-0 flags/mixflags bytes were swapped to keep
+   testing the same volume-table combine under the corrected byte source
+   (see `tests/scripts/test_boot.sh`'s own comment on this).
 
 ## Effects: glissando, portamento, vibrato, envelope-glide
 
@@ -248,17 +343,33 @@ things, each clearly delineated:
     This matches physical reality: 289/512=0.5645 closely tracks an Oric
     AY clock roughly half its 1MHz CPU clock against the Spectrum's
     1.7734MHz reference (0.5639) — sanity-checked, not just asserted.
-  - **Volume/amplitude scaling**: a simple linear combine
-    (`(channel_volume * (sample_amplitude+1)) >> 4`) rather than
-    replicating `ppt3.s`'s `VolTableCreator` 16×16 lookup table or its
-    `CrAmSl` amplitude-slide-from-sample-flags mechanism (a
-    tremolo-like effect). Monotonic and reasonable, but not verified
-    against the reference implementation's exact values.
-  - **Mixer/noise bits**: tone is enabled whenever a channel is active
-    (struck, not released); noise is enabled once a channel has executed
-    any noise-period-set command, and stays enabled (rather than the
-    per-sample-step noise toggle nuance `ppt3.s`'s mix-flags byte
-    also seems to carry).
+  - **Volume/amplitude scaling**: NO LONGER a scope cut as of the
+    noise/volume investigation below — `PT3_VOLUME_TABLE` (in `pt3.c`) is
+    `ppt3.s`'s own `VolTableCreator` 16×16 table, precisely re-derived by
+    simulating its 6502 fixed-point generation algorithm in Python (not a
+    linear approximation). An earlier draft used a simple linear combine
+    (`(channel_volume * (sample_amplitude+1)) >> 4`) instead — measurably
+    ~15-18% quieter on average across all 256 volume/amplitude
+    combinations than the real table, a real, confirmed contributor to a
+    "volume sounds too low" complaint. `ppt3.s`'s `CrAmSl` amplitude-slide
+    mechanism is also implemented now (`amp_slide` in `Pt3Channel`,
+    precisely traced from `CH_AMP`'s `cmp #15/beq CH_NOAM` and `cmp
+    #$F1/beq CH_NOAM` clamping) — a persistent per-channel offset,
+    accumulated ±1/tick whenever the current step's `sam_flags` bit7 is
+    set (bit6 picks direction), added to the raw amplitude nibble before
+    the table lookup. Getting **which byte** supplies that raw nibble was
+    itself a second, separately-confirmed bug — see the format section
+    above ("Two real, confirmed bugs") for the full story: it must come
+    from `sam_mixflags`, not `sam_flags`.
+  - **Mixer/noise bits**: NO LONGER a scope cut either — both tone-enable
+    and noise-enable are derived fresh every tick from the CURRENT sample
+    step's own mix-flags byte (bit4=tone mask, bit7=noise mask, both
+    active-low), precisely matching `ppt3.s`'s `CH_MIX`/`CH_EXIT`
+    incremental mixer-byte construction (verified by simulating its
+    per-channel bit-extraction-and-rotate algorithm in Python against the
+    AY's real bit0-2=tone/bit3-5=noise layout). Two earlier drafts got
+    this wrong in two different ways — see the format section above for
+    both.
   - **Effects (portamento, glissando, vibrato on/off, envelope glide)**:
     implemented (see "Effects" above), but via a from-first-principles
     design that produces the correct musical result rather than a
@@ -281,9 +392,17 @@ real tune) exercising the core decode path: a volume+ornament/sample-select
 release on channel C. `src/main.c` loads it, calls `pt3_init()` and one
 `pt3_tick()` (direct call, not via `hrirq` — deterministic, not real-time),
 and prints the 14-byte shadow array as hex; `tests/scripts/test_boot.sh`
-asserts the exact resulting bytes (`79 07 BD 03 00 00 00 3C 0F 0A 00 00
+asserts the exact resulting bytes (`79 07 BD 03 00 00 00 24 0F 0B 00 00
 00`), hand-verified against the module's own crafted commands before being
-locked in. This proves the header parsing, order-list/pattern-pointer
+locked in (byte 7, the mixer register, is `0x24` because the tone/noise
+mixer-enable bits are derived from the current sample step's own flags byte
+every tick, not a permanent per-channel latch -- a real, confirmed bug,
+fixed after the noise-period-select command (0x20-0x3F) was found to be
+setting a per-channel noise-enable flag that then never turned back off;
+byte 9, channel B's volume register, is `0x0B` because `PT3_VOLUME_TABLE`
+-- ppt3.s's own `VolTableCreator` table, precisely re-derived -- replaced
+an earlier linear volume/amplitude combine that gave `0x0A` for this same
+combination, a real, confirmed under-representation). This proves the header parsing, order-list/pattern-pointer
 derivation, multi-command row decoding, ornament/sample stepping, note-table
 lookup, amplitude scaling, mixer-bit computation, and envelope write-gating
 all produce the exact expected values for this test case — real behavioral
@@ -300,7 +419,8 @@ step=+10). Hand-computed tick-by-tick: channel A's tone goes
 B's vibrato toggles inaudible at tick 2 and audible again at tick 5; the
 shared envelope period sweeps 0 → 10 → 20. `src/main.c` runs 5 ticks and
 prints the resulting shadow array; `tests/scripts/test_boot.sh` asserts
-the exact bytes (`15 07 FD 04 00 00 00 3C 0F 0A 00 14 00`).
+the exact bytes (`15 07 FD 04 00 00 00 24 0F 0B 00 14 00`) -- bytes 7/9
+are `0x24`/`0x0B` for the same two reasons noted above.
 
 **A real bug this test caught during development** (not a hypothetical):
 the first draft of this fixture gave channel C a release command with no

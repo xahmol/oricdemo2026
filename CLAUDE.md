@@ -42,8 +42,9 @@ program.
 are BOTH the real demo (`src/main.c` + `src/section_*.c`) — no "simple tap
 only" version. Tape/LOCI no longer depends on LOCI for graphics (only for
 loading its music file at runtime), so it runs fine in plain Oricutron,
-including real AY audio (Oricutron emulates AY audio; Phosphoric doesn't —
-see `make run-phos` below). The floppy-disk target is a bootable Microdisc
+including real AY audio — Phosphoric ALSO emulates real AY audio, so
+`make run-phos` (below) is just as valid a way to see/hear the real demo.
+The floppy-disk target is a bootable Microdisc
 `.dsk` image needing no LOCI device and no DOS/SEDORIC resident, with the
 music file baked into the disk image instead — see
 [docs/floppy.md](docs/floppy.md). Both targets are built and tested
@@ -54,9 +55,11 @@ Build chain (see `Makefile`):
 ```
 make            # compile -> build/oricdemo.bin (Oscar64, HIRES runtime) -> build/oricdemo.tap
 make run        # launch the real demo (build/oricdemo.tap) in Oricutron (needs ORICUTRON_HOME)
-make run-phos   # launch src/buildtest.c (build/buildtest.tap) visually in Phosphoric instead --
-                # the build-chain/LOCI/PT3 regression test, not the real demo (see above)
-                # (needs PHOSDIR in .env; oric1-emu must be built with SDL2=1)
+make run-phos   # launch the real demo (build/oricdemo.tap) visually in Phosphoric instead --
+                # both emulators give real AY audio; needs PHOSDIR in .env, oric1-emu
+                # built with SDL2=1
+make run-phos-buildtest # launch src/buildtest.c (build/buildtest.tap) visually in Phosphoric --
+                # the build-chain/LOCI/PT3 regression test, not the real demo
 make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.py unit tests
 make test-hires # opt-in: HIRES library Phosphoric smoke test (separate .tap, oric_crt_hires.c)
 make test-pictconv # oric_pictconv.py unit tests alone (pure Python, no emulator)
@@ -112,8 +115,8 @@ make clean
   `tests/fixtures/music.pt3` for one tick, then `music_effects.pt3` for five
   ticks exercising portamento/vibrato/envelope-glide, printing the computed
   AY register values each time — see `docs/pt3.md`'s Verification section).
-  Exercised by `make test`/`make run-phos`. This is what used to live in
-  `src/main.c` before that became the real demo above.
+  Exercised by `make test`/`make run-phos-buildtest`. This is what used to
+  live in `src/main.c` before that became the real demo above.
 - `src/hires_test.c` — HIRES-mode entry point (`oric_crt_hires.c` runtime). Growing
   test fixture for `include/hires.c`/`ttf.c`, exercised by `make test-hires` —
   not demo content, see `tests/scripts/test_hires.sh` for what's asserted.

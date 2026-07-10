@@ -210,6 +210,17 @@ else
     check_byte "hspr_erase row0 (\$BA90)" "0xBA90:1" "40" "$DUMP"
     check_byte "hspr_erase row1 (\$BAB8)" "0xBAB8:1" "40" "$DUMP"
 
+    # hxspr_draw/erase colour-bracket save/restore test, row 190: 0x7a/0x6b
+    # were poked as "background art" stand-ins at the bracket columns
+    # (col9/col12) before drawing a colour-bracketed hxspr sprite at
+    # col10-11 over them. Neither value equals the old hardcoded-blank
+    # fallback (0x40), so seeing them survive the draw+erase round trip at
+    # $BDB9/$BDBC proves hxspr_erase() restored the REAL bytes via
+    # color_backup, not a hardcoded blank (the tree-erasing bug this test
+    # was added to catch).
+    check_byte "hxspr colour bracket left (\$BDB9)"  "0xBDB9:1" "7a" "$DUMP"
+    check_byte "hxspr colour bracket right (\$BDBC)" "0xBDBC:1" "6b" "$DUMP"
+
     # hires_row_colors_range test: rows 175/177/179 (stride 2 from 175)
     # get INK=RED(01)/PAPER=GREEN(12); rows 176/178 keep their 0xAA
     # sentinel, proving the stride actually skipped them.
