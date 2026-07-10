@@ -311,7 +311,132 @@ real `.aky` file bytes, validated the header/Linker/Track structure and
 every RegisterBlock decode path *before* any C was written. Real emulator
 (Phosphoric) RAM-dump captures of `arkos_debug_shadow()` across a real
 stretch of playback, on both distribution targets, confirm sane, varied AY
-register output (see this project's own commit history for specifics) --
-the user's own listening test via `make run-phos`/`make run-disk` remains
-the final word on whether the music actually sounds right, same as every
-audio change to this project.
+register output -- the user's own listening test via `make
+run-phos`/`make run-disk` remains the final word on whether the music
+actually sounds right, same as every audio change to this project.
+
+### Real bug found and fixed: `SOFTWAREONLY` vs `SOFTWAREANDHARDWARE` dispatch inverted
+
+After the initial implementation shipped (synthetic `arkos_test.aky` fixture
+green, both targets stable), the user reported real playback was audible
+but "nonsensical notes." The synthetic fixture only ever exercised the
+`NoSoftNoHard`/`NoSoftNoHard-or-loop` paths (deliberately, to keep it a
+simple straight-line decode) -- `SOFTWAREONLY`, `SOFTWAREANDHARDWARE`, and
+`HARDWAREONLY`, the paths that actually write tone-period registers, were
+never validated against real data before this.
+
+**Diagnosis**: wrote a second, more thorough Python replica -- this time
+simulating the *entire* player (3-channel loop, Linker/Track/RegisterBlock
+state machine, not just one channel's own track) against the real shipped
+`assets/steppingout.aky`, run for 3000 ticks (~60 simulated seconds), and
+scanning every channel's own decode pointer for values landing outside the
+file's own address range. Found channel B's decode pointer periodically
+jumping to nonsensical addresses (e.g. `$0806`) -- always immediately after
+two consecutive `SOFTWAREANDHARDWARE`-non-initial decodes triggered the
+RegisterBlock format's own real "loop" mechanism (a frame legitimately
+pointing at a different block address) with a target pointer that made no
+sense for this file. This meant the stream was genuinely misaligned by the
+time the "loop" fired -- a real trigger, but on the wrong byte, cascading
+into reading essentially random memory as music data (explaining both
+"nonsensical notes" and, eventually, decode corruption entirely).
+
+Re-fetched `akyplayer.s` directly and traced the *exact* 6502 branch
+semantics of its `BCC label / JMP target / label:` long-branch idiom (used
+throughout the RegisterBlock dispatch instead of a direct `BCS`/`BCC` when
+the target is too far for a short branch): carry **SET** falls through to
+the `JMP` (goes to `target`); carry **CLEAR** branches over the `JMP` to
+`label` (falls through to whatever comes *after* the whole block). This is
+the *opposite* polarity from a same-named direct branch instruction, and
+three of `arkos.c`'s dispatch conditions had it backwards -- inverted
+during the original port, and never caught because they cancelled out
+correctly in isolation for the specific byte values the synthetic fixture
+happened to use:
+
+1. `arkos_rb_initial()`'s top-level dispatch (`if (r->c == 0)` for entering
+   `SOFTONLY_OR_SOFTANDHARD` -- should be `if (r->c == 1)`).
+2. `arkos_rb_initial()`'s nested `SOFTWAREANDHARDWARE`-vs-`SOFTWAREONLY`
+   check (same inversion).
+3. `arkos_rb_noninitial_from_byte()`'s nested `SOFTWAREANDHARDWARE`-vs-
+   `SOFTWAREONLY` check (same inversion; the non-initial dispatch's
+   top-level check already used a direct `BCS` and was correctly `if (r->c
+   == 1)` from the start).
+
+**Fix**: flipped all three conditions to `if (r->c == 1)`. Re-ran the
+full-player Python simulation against the real song: **0 anomalies** (down
+from 170 out-of-bounds pointer excursions) over the same 3000-tick window,
+and the reconstructed tone-period sequence changed from wildly jumping
+values (e.g. 3937 -> 1121 -> 97 -> 0 -> 47) to a musically coherent,
+repeating pattern (alternating 95/47 -- an octave relationship). The
+synthetic `tests/fixtures/arkos_test.aky` fixture's own byte values had to
+be regenerated (the same bytes now decode through *different* branches
+under the corrected conditions) -- see `src/buildtest.c`'s own comment for
+the new expected values. Verified stable over a real 60M-cycle Phosphoric
+run of the actual demo (tape target) with the corrected code, no crashes,
+bird/background still rendering correctly.
+
+**Lesson for any future change to this dispatch tree**: the `BCC label /
+JMP target / label:` idiom's polarity is easy to misread once, and -- as
+happened here -- a single self-consistent misreading survives a
+from-scratch Python replica built from the *same* misreading, and survives
+a synthetic test fixture that happens not to exercise the affected branch.
+Validating a decoder's *internal* consistency (C matches its own Python
+replica) is necessary but not sufficient; the real check is decoding *real
+file bytes* end-to-end and confirming the results make sense (in-bounds
+pointers, plausible tone periods), not just "does it match my own model of
+the format."
+
+### Second real bug found and fixed: the mixer shift-accumulator ran one shift too many
+
+After the dispatch-inversion fix above, the user reported real playback was
+"almost there" but the third channel's own line never seemed to appear.
+Extended the full-player Python simulation to run a whole song loop
+(~12000 ticks/240 seconds for `steppingout.aky`) and track each channel's
+own tone-enabled/noise-enabled/volume state over that whole window.
+Channel 3 (index 2) showed `tone_enabled` **0 out of 20000** simulated
+ticks and `noise_enabled` **20000 out of 20000** -- stuck permanently
+routed through the noise generator instead of its own tone, for the
+*entire* song, while channels 1 and 2 showed normal, varied tone/noise
+mixes correlated with their own volume activity. This exactly explains
+"the third channel line never appears": it was there and had real,
+varying volume/note data, but always rendered as noise texture rather than
+a melodic voice.
+
+**Root cause**: `arkos.c`'s `r7` mixer accumulator (see the Format section
+above for the shift-accumulator technique) shifted `r7` right by one
+**unconditionally after every channel**, including the third. Re-checked
+`akyplayer.s`'s own `PLY_AKY_PLAY` directly: it does `LSR r7` between
+channel 1 and channel 2, then `ROR r7` between channel 2 and channel 3, and
+critically **no shift at all after channel 3** -- exactly 2 shifts for 3
+channels, not one per channel. Each channel's own tone/noise decision is
+written to a *fixed* bit position (bit 2 for tone, bit 5 for noise) during
+its own turn; the between-channel shifts are what walk each channel's own
+bit down into its final, correct position in the real AY mixer register
+(bit 0/3 for channel A, bit 1/4 for channel B, bit 2/5 for channel C). An
+extra, unwanted 3rd shift pushes channel 3's own bits one position too far
+and simultaneously overwrites them with whatever channel 1's own bits had
+already been shifted into by that point -- since channel 1's tone
+happened to stay closed almost all the time in this song's own bassline
+instrument, channel 3's "tone" bit read as permanently disabled.
+
+**Fix**: guard the shift with `if (i < 2)` in `arkos_tick()`'s 3-channel
+loop, so it only fires between channels, matching the reference exactly.
+Re-ran the full-song simulation: channel 3's `tone_enabled` count now
+tracks its own volume activity exactly (18848/20000 ticks, matching
+18848/20000 nonzero-volume ticks precisely), the same clean correlation
+channels 1 and 2 already showed. The synthetic fixture's expected mixer
+value also changed (`0x1F` -> `0x3F`, since all 3 of its channels always
+close their own tone and never open noise -- with the shift fixed, all 6
+tone+noise bits correctly end up disabled instead of a scrambled partial
+result). Verified stable over another real 60M-cycle Phosphoric run, no
+crashes, bird/background still correct.
+
+**Lesson, same theme as the first bug**: a mixer register built via a
+shift-accumulator across multiple channels can be "self-consistently
+wrong" -- every individual channel's own write looks locally plausible,
+and even a hand-built synthetic fixture (which only ever computes ONE
+final mixer value per tick, not a per-channel breakdown) won't expose a
+bit-position scramble unless you specifically check that a channel's own
+*known* activity (its volume) correlates with its own tone/noise-enable
+bits over an extended, realistic window -- exactly what following one
+song's structure for its FULL loop, not just a handful of ticks, made
+visible.

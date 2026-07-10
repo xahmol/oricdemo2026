@@ -144,11 +144,11 @@ static void arkos_rb_noninitial_from_byte(ArkosRB *r);
 static void arkos_rb_initial(ArkosRB *r)
 {
     arkos_rb_ror(r); // line 856
-    if (r->c == 0)
+    if (r->c == 1)
     {
         // SOFTONLY_OR_SOFTANDHARD
         arkos_rb_ror(r); // line 1010
-        if (r->c == 0)
+        if (r->c == 1)
         {
             // SOFTWAREANDHARDWARE, lines 1111-1235
             arkos_rb_ror(r); // retrig? line 1113
@@ -256,7 +256,7 @@ static void arkos_rb_noninitial_from_byte(ArkosRB *r)
         {
             // SOFTONLY_OR_SOFTANDHARD
             arkos_rb_ror(r); // line 1348
-            if (r->c == 0)
+            if (r->c == 1)
             {
                 // SOFTWAREANDHARDWARE, lines 1550-1684
                 arkos_rb_send_vol(r, 0xFF); // lines 1551-1566
@@ -686,11 +686,23 @@ __interrupt void arkos_tick(void)
 
         vol_reg = (uint8_t)(vol_reg + 1);
         freq_reg = (uint8_t)(freq_reg + 2);
-        // Shifts r7 by 1 between channels (LSR after channel 1, ROR after
-        // channel 2 in the reference -- both are equivalent here since the
-        // difference only affects bits 6/7, which the AY mixer register
-        // itself ignores).
-        r7 = (uint8_t)(r7 >> 1);
+        // Shifts r7 by 1 BETWEEN channels only -- LSR after channel 1, ROR
+        // after channel 2, but NEVER after channel 3 (akyplayer.s's own
+        // PLY_AKY_PLAY: exactly 2 shifts total for 3 channels, positioned
+        // between them, not one per channel). A real, confirmed bug had
+        // this shifting unconditionally on every iteration (3 shifts, one
+        // too many) -- each channel's own tone/noise bits are built at a
+        // FIXED bit position (bit2/bit5) during its own turn and only
+        // reach their final AY-register position via these BETWEEN-channel
+        // shifts; the extra 3rd shift silently pushed channel 3's own bits
+        // one position too far, scrambling which physical bit encoded
+        // which channel entirely (confirmed via a full-song Python
+        // simulation: channel 3's tone was ALWAYS reported disabled,
+        // noise ALWAYS enabled, for the entire song -- exactly the
+        // "third channel line never appears" symptom, since it played as
+        // noise texture instead of a melodic tone throughout).
+        if (i < 2)
+            r7 = (uint8_t)(r7 >> 1);
     }
 
     arkos_ay_write_if_changed(AY_REG_MIXER, (uint8_t)(r7 & 0x3F));

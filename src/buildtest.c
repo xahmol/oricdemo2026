@@ -57,7 +57,19 @@ int main(void)
     // level instead, by pattern 1's own end-of-song marker). Built and
     // hand-verified against the same instruction-level decode replica used
     // to validate arkos.c itself -- see docs/arkos.md's Verification
-    // section for the exact expected register values below.
+    // section for the exact expected register values below. Byte values
+    // (0x08, 0x00, 0x04, 0x0C) were re-derived after a real dispatch-
+    // condition-inversion bug was found and fixed in the SOFTWAREONLY-vs-
+    // SOFTWAREANDHARDWARE branch (see docs/arkos.md) -- this fixture alone
+    // never exercised those two paths, so it did NOT catch that bug; the
+    // fix was found by decoding the real shipped song instead. Expected
+    // mixer value (0x3F, not 0x1F) also reflects a SECOND real bug fix,
+    // in the r7 shift-accumulator's timing (see arkos_tick()'s own
+    // comment) -- also never caught by this fixture, since a single
+    // wrong-but-consistent mixer computation looks the same whether
+    // computed 2 or 3 shifts deep; only decoding the real song and
+    // checking each channel's own tone/noise state against its own
+    // volume activity exposed it.
     if (arkos_load("arkos_test.aky"))
     {
         const uint8_t *shadow;
@@ -71,9 +83,13 @@ int main(void)
 
         // Ticks 2-4: three non-initial RegisterBlock frames (bytes 0x00,
         // 0x04, 0x0C -- see the fixture comment above), landing on a known
-        // final AY register snapshot (R7=0x1F, R8/R9/R10=0x01, all others
-        // unchanged from tick 1's shadow -- this fixture's byte pattern
-        // never touches tone-period or hardware-envelope registers).
+        // final AY register snapshot (R7=0x3F, R8/R9/R10=0x01 -- same as
+        // tick 1's own value, by coincidence of this fixture's chosen
+        // bytes, not because nothing happened in between: tick 2 writes
+        // nothing, tick 3 writes 0, tick 4 writes back to 1). Other
+        // registers stay unchanged from tick 1's shadow -- this fixture's
+        // byte pattern never touches tone-period or hardware-envelope
+        // registers.
         for (i = 0; i < 3; i++)
             arkos_tick();
         shadow = arkos_debug_shadow();

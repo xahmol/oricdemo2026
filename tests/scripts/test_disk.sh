@@ -91,7 +91,7 @@ else
     # straight into $C000 (see docs/floppy.md/docs/arkos.md), and the
     # module data is byte-identical to the tape/LOCI target's copy.
     check_found "Arkos tune loaded"         "Arkos tune loaded, AY regs:"    "$BOOT_DUMP"
-    check_found "Arkos AY registers"        "00 00 00 00 00 00 00 1F 40 40 40 00 00" "$BOOT_DUMP"
+    check_found "Arkos AY registers"        "00 00 00 00 00 00 00 3F 01 01 01 00 00" "$BOOT_DUMP"
     check_found "exit prompt renders"       "Press any key to exit"         "$BOOT_DUMP"
 fi
 
