@@ -18,6 +18,7 @@
 #include "section_bird.h"
 #include "section_clouds.h"
 #include "section_splash.h"
+#include "section_logo.h"
 #include "rom_charset.h"
 #include "idi8b_altcharset.h"
 
@@ -176,12 +177,22 @@ static bool bird_scene_tick(const HiresBitmap *screen)
 #define SPLASH_MIN_TICKS 20u
 #define SPLASH_MAX_TICKS 500u
 
-// The demo's own running order -- currently the idi8b splash followed by
-// the one existing scene; later phases insert the logo-intro between them
-// and the showcase sections/credits after (see this project's own
-// planning notes for the full list).
+// HIRES Oric logo + circling raster bars: circles indefinitely (its own
+// tick() always returns false, see section_logo.c), so min_ticks/
+// max_ticks are the only thing pacing it -- min_ticks keeps an impatient
+// keypress from insta-skipping before the bar has completed even one
+// pass, max_ticks (~22s) gives a reasonable amount of time to watch the
+// circling effect before moving on regardless.
+#define LOGO_MIN_TICKS 20u
+#define LOGO_MAX_TICKS 300u
+
+// The demo's own running order -- currently the idi8b splash, the Oric
+// logo/raster-bar intro, and the one existing scene; later phases insert
+// the showcase sections/credits after (see this project's own planning
+// notes for the full list).
 static const DemoSection sections[] = {
     { section_splash_init, section_splash_tick, SPLASH_MIN_TICKS, SPLASH_MAX_TICKS },
+    { section_logo_init, section_logo_tick, LOGO_MIN_TICKS, LOGO_MAX_TICKS },
     { bird_scene_init, bird_scene_tick, SECTION_FOREVER, SECTION_FOREVER },
 };
 #define NUM_SECTIONS (sizeof(sections) / sizeof(sections[0]))

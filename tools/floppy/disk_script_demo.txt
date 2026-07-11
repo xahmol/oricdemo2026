@@ -41,3 +41,8 @@ AddDefine LOADER_DEMO_FILE {FileIndex}
 ; (STORAGE_FLOPPY) -- see src/main.c's MUSIC_FILE.
 AddFile {MUSIC_BIN}
 AddDefine LOADER_MUSIC_FILE {FileIndex}
+
+; File index 2: assets/oriclogo.bin, loaded via picture_load(2)
+; (STORAGE_FLOPPY) -- see src/section_logo.c's LOGO_FILE.
+AddFile {LOGO_BIN}
+AddDefine LOADER_LOGO_FILE {FileIndex}

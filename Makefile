@@ -95,6 +95,8 @@ MAIN_SRCS = \
   src/main.c            \
   src/section_splash.c  \
   src/section_splash.h  \
+  src/section_logo.c    \
+  src/section_logo.h    \
   src/section_background.c \
   src/section_background.h \
   src/section_clouds.c  \
@@ -107,6 +109,7 @@ MAIN_SRCS = \
   assets/rom_charset.h  \
   assets/bird.h         \
   assets/steppingout.aky \
+  assets/oriclogo.bin   \
   include/oric_crt_hires.c \
   include/crt_math.c    \
   include/oric.h        \
@@ -114,6 +117,8 @@ MAIN_SRCS = \
   include/hires.h       \
   include/ttf.c         \
   include/ttf.h         \
+  include/picture.c     \
+  include/picture.h     \
   include/sprite.c      \
   include/sprite.h      \
   include/fixedmath.c   \
@@ -281,6 +286,8 @@ FLOPPY_SRCS = \
   src/main.c               \
   src/section_splash.c     \
   src/section_splash.h     \
+  src/section_logo.c       \
+  src/section_logo.h       \
   src/section_background.c \
   src/section_background.h \
   src/section_clouds.c     \
@@ -293,6 +300,7 @@ FLOPPY_SRCS = \
   assets/rom_charset.h     \
   assets/bird.h            \
   assets/steppingout.aky   \
+  assets/oriclogo.bin      \
   include/oric_crt_floppy_hires.c \
   include/crt_math.c       \
   include/oric.h           \
@@ -300,6 +308,8 @@ FLOPPY_SRCS = \
   include/hires.h          \
   include/ttf.c            \
   include/ttf.h            \
+  include/picture.c        \
+  include/picture.h        \
   include/sprite.c         \
   include/sprite.h         \
   include/fixedmath.c      \
@@ -322,6 +332,7 @@ FLOPPY_BOOTSECTOR_SRCS = tools/floppy/bootsector_microdisc.c
 # via arkos_load(1) (STORAGE_FLOPPY) -- see src/main.c's MUSIC_FILE and
 # tools/floppy/disk_script_demo.txt.
 FLOPPY_MUSIC_BIN = assets/steppingout.aky
+FLOPPY_LOGO_BIN = assets/oriclogo.bin
 
 # -------------------------------------------------------------------------
 # Two-pass build (see docs/floppy.md):
@@ -381,7 +392,7 @@ build/floppy_bootsector.bin: build/floppy_bootsector_compiled.bin
 # NOTE: oric_floppybuilder.py resolves script-relative paths against the
 # SCRIPT's own directory (tools/floppy/), not the caller's cwd -- so every
 # -D path here is made absolute via $(CURDIR) to sidestep that entirely.
-build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN)
 	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/floppy_init.dsk \
@@ -391,7 +402,8 @@ build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_
 	    -D LOADER_BIN=$(CURDIR)/build/floppy_loader_placeholder.bin \
 	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
 	    -D DEMO_BIN=$(CURDIR)/build/floppy_demo_pass1.bin \
-	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN)
+	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN) \
+	    -D LOGO_BIN=$(CURDIR)/$(FLOPPY_LOGO_BIN)
 
 # Real values, parsed out of the generated header by the shell (make has
 # no built-in way to read a C #define -- this is simpler than teaching
@@ -430,7 +442,7 @@ build/floppy_demo.bin: build/floppy_directory.h $(FLOPPY_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
 	    -o=build/floppy_demo.bin src/main.c
 
-build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin
+build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN)
 	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/oricdemo_floppy.dsk \
@@ -440,7 +452,8 @@ build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/f
 	    -D LOADER_BIN=$(CURDIR)/build/floppy_loader.bin \
 	    -D LOADER_LOAD_ADDR=$(FLOPPY_LOADER_ADDRESS) \
 	    -D DEMO_BIN=$(CURDIR)/build/floppy_demo.bin \
-	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN)
+	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN) \
+	    -D LOGO_BIN=$(CURDIR)/$(FLOPPY_LOGO_BIN)
 
 disk: build/oricdemo_floppy.dsk
 
@@ -701,6 +714,7 @@ check-usb:
 usb: check-usb all
 	cp build/$(MAIN).tap "$(USBPATH)/"
 	cp assets/steppingout.aky "$(USBPATH)/"
+	cp assets/oriclogo.bin "$(USBPATH)/"
 	@if [ "$(IS_WSL2)" = "1" ]; then \
 	    echo "WSL2: unmounting $(USBMOUNT)..."; \
 	    sudo umount $(USBMOUNT); \
@@ -806,6 +820,7 @@ zip: all docs
 	zip -j build/$(ZIPNAME).zip \
 	    build/$(MAIN).tap \
 	    assets/steppingout.aky \
+	    assets/oriclogo.bin \
 	    README.pdf
 	@echo "Created build/$(ZIPNAME).zip"
 
