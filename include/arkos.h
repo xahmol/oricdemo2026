@@ -90,7 +90,36 @@ __interrupt void arkos_tick(void);
 
 // Silences all 3 channels (zero amplitude) without touching hrirq state --
 // call hrirq_stop() separately if arkos_tick() should stop firing at all.
+// Meant to precede a genuine restart (arkos_load() of a NEW module +
+// arkos_init(), which always re-syncs the AY shadow from zero) -- NOT
+// meant to precede arkos_pause()/arkos_resume()'s use case (see below):
+// arkos_stop() writes the AY hardware directly without updating
+// arkos_debug_shadow()'s own copy, so calling arkos_resume() after
+// arkos_stop() would restore a stale pre-stop volume, not silence.
 void arkos_stop(void);
+
+// Silences all 3 channels LIKE arkos_stop(), but remembers each channel's
+// current volume byte first and keeps the internal AY-register shadow
+// consistent with the silence (unlike arkos_stop(), which leaves the
+// shadow stale) -- see arkos_resume(). Does NOT touch playback position
+// (Linker/Track/RegisterBlock pointers, per-channel rb_wait countdowns) at
+// all: call hrirq_stop() separately to actually stop arkos_tick() from
+// advancing that position while paused (matching arkos_stop()'s own
+// convention of leaving hrirq state to the caller). Meant for a BRIEF,
+// same-track pause (e.g. silencing music for the duration of a
+// file_load()/floppy_load() call elsewhere in the demo -- see
+// docs/arkos.md's "Pause vs. stop" section for why neither loading path
+// is safe to call while arkos_tick() is ticking live), not for switching
+// to a different module.
+void arkos_pause(void);
+
+// Restores the volumes arkos_pause() last snapshotted (instantly
+// un-muting to the exact pre-pause loudness) and re-syncs the AY shadow
+// to match. Playback position was never touched by arkos_pause(), so
+// resuming arkos_tick() (via hrirq_start(), called separately) continues
+// the SAME held note/pattern exactly where it left off -- not a restart.
+// No-op if arkos_pause() was never called.
+void arkos_resume(void);
 
 // Returns a pointer to the last-computed AY registers 0-13 (14 bytes) --
 // same testing-only rationale as pt3_debug_shadow() (Phosphoric can't read

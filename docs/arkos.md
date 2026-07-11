@@ -184,6 +184,8 @@ bool arkos_load(const char *path);
 void arkos_init(void);
 __interrupt void arkos_tick(void);
 void arkos_stop(void);
+void arkos_pause(void);
+void arkos_resume(void);
 const uint8_t *arkos_debug_shadow(void);
 ```
 
@@ -217,6 +219,56 @@ call `hrirq_stop()` separately to stop `arkos_tick()` firing at all.
 `arkos_debug_shadow()` returns the last-computed 14 AY register values --
 testing only, same rationale as `pt3_debug_shadow()` (Phosphoric can't
 read the AY chip's own internal state back).
+
+### Pause vs. stop
+
+Neither `file_load()` (tape/LOCI) nor `floppy_load()` (floppy target) is
+safe to call while `arkos_tick()` is ticking live via an active
+`hrirq_start()`: the LOCI path would be progressively overwriting the
+exact `$C000` `ARKOS_MODULE` buffer `arkos_tick()` is concurrently
+decoding (a genuine data race, nothing pauses playback during a load),
+and the floppy target's resident loader has a tight WD1793 DRQ-polling
+timing budget with no interrupt protection at all -- a raster IRQ firing
+mid-sector-read could plausibly corrupt it. Any code that needs to load a
+file while music might already be playing (switching to a different
+track, or loading an unrelated asset like a picture mid-demo) MUST
+`hrirq_stop()` first and `hrirq_start()` again after -- but what happens
+to the *music* itself during that window differs depending on intent:
+
+- **Switching to a genuinely different track** (`arkos_stop()` then
+  `arkos_load()` of a NEW module, then `arkos_init()`): `arkos_stop()`'s
+  own staleness (see its own doc comment -- it writes the AY hardware
+  directly without updating the shadow) doesn't matter here, because
+  `arkos_init()` always resets the shadow to all-zero anyway as part of
+  starting the new module fresh (`arkos_pattern_counter = 1` forces an
+  immediate pattern-load on the new track's very first tick). This is a
+  restart, by design.
+- **A brief pause with the SAME track resuming afterward** (e.g.
+  silencing music for the duration of an unrelated `file_load()`/
+  `floppy_load()` call elsewhere in the demo, not a track switch):
+  `arkos_stop()` + a later `hrirq_start()` with no `arkos_init()` in
+  between would leave a real bug. `arkos_apply_registerblock()` only
+  rewrites a channel's volume register when the current tick's
+  RegisterBlock frame explicitly says to (`rb->wrote_vol`) -- a sustained
+  note routinely spans many ticks without re-specifying an unchanged
+  volume, relying on the AY register already holding the right value.
+  `arkos_stop()` zeroes the real hardware but leaves the shadow holding
+  the OLD pre-stop volume, so `arkos_ay_write_if_changed()` sees
+  `shadow == target` (both still the old value, as far as it knows) and
+  skips the rewrite on the first tick after resuming -- the channel would
+  stay silently stuck at 0 until some later tick happens to change that
+  channel's volume explicitly, which could be many ticks away. Use
+  `arkos_pause()`/`arkos_resume()` instead: `arkos_pause()` snapshots each
+  channel's current volume AND zeroes the shadow to match the silence (so
+  nothing gets confused about what's "unchanged"), `arkos_resume()`
+  restores the exact pre-pause volumes into both the hardware and the
+  shadow in one step. Playback position (Linker/Track/RegisterBlock
+  pointers, per-channel `rb_wait` countdowns) is untouched by either call
+  -- it's `hrirq_stop()`/`hrirq_start()` (called separately, same
+  convention as `arkos_stop()`) that actually freezes/resumes the passage
+  of playback time, simply by not calling `arkos_tick()` at all while
+  paused. Net effect: the held note/pattern resumes exactly where it left
+  off, at exactly its pre-pause volume, with no discontinuity.
 
 ## Format, precisely traced from `akyplayer.s`
 

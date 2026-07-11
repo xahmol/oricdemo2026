@@ -93,12 +93,18 @@ CFLAGS = \
 
 MAIN_SRCS = \
   src/main.c            \
+  src/section_splash.c  \
+  src/section_splash.h  \
   src/section_background.c \
   src/section_background.h \
   src/section_clouds.c  \
   src/section_clouds.h  \
   src/section_bird.c    \
   src/section_bird.h    \
+  assets/handwriting_font.h \
+  assets/idi8b_logo.h   \
+  assets/idi8b_altcharset.h \
+  assets/rom_charset.h  \
   assets/bird.h         \
   assets/steppingout.aky \
   include/oric_crt_hires.c \
@@ -106,6 +112,8 @@ MAIN_SRCS = \
   include/oric.h        \
   include/hires.c       \
   include/hires.h       \
+  include/ttf.c         \
+  include/ttf.h         \
   include/sprite.c      \
   include/sprite.h      \
   include/fixedmath.c   \
@@ -116,6 +124,8 @@ MAIN_SRCS = \
   include/ay.h          \
   include/rasterirq.c   \
   include/rasterirq.h   \
+  include/keyboard.c    \
+  include/keyboard.h    \
   include/loci.c        \
   include/loci.h
 
@@ -269,12 +279,18 @@ CFLAGS_FLOPPY_DEMO = \
 
 FLOPPY_SRCS = \
   src/main.c               \
+  src/section_splash.c     \
+  src/section_splash.h     \
   src/section_background.c \
   src/section_background.h \
   src/section_clouds.c     \
   src/section_clouds.h     \
   src/section_bird.c       \
   src/section_bird.h       \
+  assets/handwriting_font.h \
+  assets/idi8b_logo.h      \
+  assets/idi8b_altcharset.h \
+  assets/rom_charset.h     \
   assets/bird.h            \
   assets/steppingout.aky   \
   include/oric_crt_floppy_hires.c \
@@ -282,6 +298,8 @@ FLOPPY_SRCS = \
   include/oric.h           \
   include/hires.c          \
   include/hires.h          \
+  include/ttf.c            \
+  include/ttf.h            \
   include/sprite.c         \
   include/sprite.h         \
   include/fixedmath.c      \
@@ -290,6 +308,8 @@ FLOPPY_SRCS = \
   include/floppy.h         \
   include/rasterirq.c      \
   include/rasterirq.h      \
+  include/keyboard.c       \
+  include/keyboard.h       \
   include/ay.c             \
   include/ay.h             \
   include/arkos.c          \

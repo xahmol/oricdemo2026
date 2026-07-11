@@ -689,10 +689,35 @@ void hb_bitblit(const HiresBitmap *dst, const HiresClip *clip, uint8_t dx, uint8
 }
 
 // -------------------------------------------------------------------------
-// Text -- renders using the Oric ROM's standard 6x8 charset (CHARSETROM,
-// see oric.h), printable ASCII 0x20-0x7F only. A ROM glyph byte's bits5-0
-// are already left-aligned exactly as HIRES pixel bytes expect (bit5 =
-// leftmost) -- see oric.h's CHARSETROM documentation.
+// Text -- renders using a copy of the Oric ROM's standard 6x8 charset held
+// in HIRES_CHARSET_STD (see oric.h), printable ASCII 0x20-0x7F only. A ROM
+// glyph byte's bits5-0 are already left-aligned exactly as HIRES pixel
+// bytes expect (bit5 = leftmost) -- see oric.h's CHARSETROM documentation.
+//
+// Reads HIRES_CHARSET_STD, NOT CHARSETROM directly, even though both are
+// meant to hold the same 96 glyphs: CHARSETROM ($FC78) is only reliably
+// valid on this project's own tape/LOCI target, and only until
+// arkos_load() banks ROM out via enable_overlay_ram() for the rest of the
+// program's runtime (see docs/arkos.md) -- on the floppy target there is
+// no real ROM at all, ever (docs/floppy.md), so CHARSETROM was never valid
+// there in the first place. HIRES_CHARSET_STD is reserved RAM either way;
+// the CALLER is responsible for having copied real font data into it
+// (typically from a compiled-in asset, once at boot, right after
+// hires_on() -- see main.c) before this function is used. Confirmed via a
+// real screenshot: reading live CHARSETROM here produced solid white
+// blocks instead of legible glyphs once music had loaded.
+//
+// Addressed as `ch*8`, NOT `(ch-0x20)*8` -- unlike CHARSETROM (which only
+// ever stores the 96 printable glyphs, indexed from 0), HIRES_CHARSET_STD
+// is a REAL charset RAM bank layout: a full 128-entry table indexed from
+// code 0 (matching charset_address()'s own documented convention, and
+// the real hardware's own footer-rendering glyph fetch, which reads this
+// exact same memory the same way). The caller's own boot-time copy must
+// place printable glyphs at their own `code*8` offset (i.e. starting at
+// byte 0x100, not byte 0) -- confirmed via a real screenshot: copying
+// straight from a CHARSETROM-convention source (0-based, 96 entries)
+// into byte 0 shifted every glyph by 0x20*8 bytes, making the footer's
+// own blank CH_SPACE cells render as some other, wrong, non-blank glyph.
 // -------------------------------------------------------------------------
 
 int hb_put_chars(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, const char *str, uint8_t len)
@@ -704,7 +729,7 @@ int hb_put_chars(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_
         if (ch < 0x20)
             break;
 
-        const uint8_t *glyph = (const uint8_t *)(CHARSETROM + (uint16_t)(ch - 0x20) * 8);
+        const uint8_t *glyph = (const uint8_t *)(HIRES_CHARSET_STD + (uint16_t)ch * 8);
         for (uint8_t row = 0; row < 8; row++)
         {
             uint8_t bits = glyph[row];

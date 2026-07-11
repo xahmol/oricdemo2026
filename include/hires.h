@@ -273,8 +273,17 @@ void hb_bitblit(const HiresBitmap *dst, const HiresClip *clip, uint8_t dx, uint8
                  const HiresBitmap *src, uint8_t sx, uint8_t sy, uint8_t w, uint8_t h, HiresBlitOp op);
 
 // -------------------------------------------------------------------------
-// Text -- renders using the Oric ROM's standard 6x8 charset (CHARSETROM),
-// printable ASCII 0x20-0x7F only. Returns the pixel width consumed.
+// Text -- renders using a copy of the Oric ROM's standard 6x8 charset
+// held in HIRES_CHARSET_STD (NOT live CHARSETROM -- see hires.c's own
+// comment for why: unreliable once ROM gets banked out/on targets with no
+// real ROM at all). Addressed as a full 128-entry table (`code*8`, from
+// code 0) -- matching real charset RAM layout, NOT CHARSETROM's own
+// 0-based-at-0x20, 96-entry convention -- so the caller's own boot-time
+// copy must place glyphs at their own `code*8` offset (printable ASCII
+// starts at byte 0x100, not byte 0). Caller must copy real font data into
+// HIRES_CHARSET_STD once at boot (typically from a compiled-in asset)
+// before first use -- see main.c. Printable ASCII 0x20-0x7F only. Returns
+// the pixel width consumed.
 // -------------------------------------------------------------------------
 
 int hb_put_chars(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, const char *str, uint8_t len);

@@ -727,6 +727,58 @@ void arkos_stop(void)
     ay_write(AY_REG_VOL_C, 0);
 }
 
+// Snapshot of each channel's volume byte at the moment of arkos_pause(),
+// restored verbatim by arkos_resume() -- see arkos.h's own comment on
+// why this differs from arkos_stop() (which leaves the AY shadow stale,
+// fine when followed by arkos_init()'s own full shadow reset, wrong when
+// followed by a resume that must NOT re-decode from scratch).
+static uint8_t arkos_paused_vol[3];
+static bool    arkos_is_paused;
+
+void arkos_pause(void)
+{
+    arkos_paused_vol[0] = arkos_ay_shadow[AY_REG_VOL_A];
+    arkos_paused_vol[1] = arkos_ay_shadow[AY_REG_VOL_B];
+    arkos_paused_vol[2] = arkos_ay_shadow[AY_REG_VOL_C];
+
+    // Unlike arkos_stop(), also updates the shadow to match the silence:
+    // arkos_apply_registerblock() only rewrites a channel's volume
+    // register when the CURRENT tick's RegisterBlock frame explicitly
+    // says to (rb->wrote_vol) -- sustained notes routinely span many
+    // ticks without re-specifying an unchanged volume. If the shadow were
+    // left stale (still holding the pre-pause value) and the very next
+    // tick after resuming didn't happen to rewrite volume, the channel
+    // would stay silent (arkos_ay_write_if_changed() sees shadow==target
+    // and skips the write) even though the tracker's own state expects
+    // the pre-pause note to still be sounding. Zeroing the shadow here
+    // avoids that; arkos_resume() below is what actually restores the
+    // real volume, at the moment audio should resume, not leaving it to
+    // chance which tick happens to rewrite it next.
+    ay_write(AY_REG_VOL_A, 0);
+    ay_write(AY_REG_VOL_B, 0);
+    ay_write(AY_REG_VOL_C, 0);
+    arkos_ay_shadow[AY_REG_VOL_A] = 0;
+    arkos_ay_shadow[AY_REG_VOL_B] = 0;
+    arkos_ay_shadow[AY_REG_VOL_C] = 0;
+
+    arkos_is_paused = true;
+}
+
+void arkos_resume(void)
+{
+    if (!arkos_is_paused)
+        return;
+
+    ay_write(AY_REG_VOL_A, arkos_paused_vol[0]);
+    ay_write(AY_REG_VOL_B, arkos_paused_vol[1]);
+    ay_write(AY_REG_VOL_C, arkos_paused_vol[2]);
+    arkos_ay_shadow[AY_REG_VOL_A] = arkos_paused_vol[0];
+    arkos_ay_shadow[AY_REG_VOL_B] = arkos_paused_vol[1];
+    arkos_ay_shadow[AY_REG_VOL_C] = arkos_paused_vol[2];
+
+    arkos_is_paused = false;
+}
+
 const uint8_t *arkos_debug_shadow(void)
 {
     return arkos_ay_shadow;

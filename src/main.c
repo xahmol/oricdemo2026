@@ -13,9 +13,13 @@
 #include "hires.h"
 #include "arkos.h"
 #include "rasterirq.h"
+#include "keyboard.h"
 #include "section_background.h"
 #include "section_bird.h"
 #include "section_clouds.h"
+#include "section_splash.h"
+#include "rom_charset.h"
+#include "idi8b_altcharset.h"
 
 // Background music: assets/steppingout.aky ("Mr.Lou - Dewfall Productions -
 // Stepping out (2019)"), an Arkos Tracker module exported to $C000 -- see
@@ -79,29 +83,131 @@ __interrupt void main_frame_tick_isr(void)
 // further).
 #define MAIN_FRAME_PACING_TICKS 3u
 
+// A demo "section" -- one entry per part of the running order (idi8b
+// splash, logo/raster-bar intro, the bird scene, each showcase, credits
+// -- see docs/README.md or the project's own planning notes for the full
+// list; only the bird scene exists so far, everything else lands in
+// later phases). `init` is called once, `tick` every main-loop iteration
+// thereafter, both given the same shared `screen` canvas every section
+// uses. `min_ticks`/`max_ticks` count main-loop iterations (NOT raw 50Hz
+// raster ticks -- see MAIN_FRAME_PACING_TICKS, each iteration already
+// spans several of those): keypresses are ignored before `min_ticks` (so
+// a section is never skipped before it's even had a chance to show
+// anything), and the section is force-advanced at `max_ticks` even with
+// no keypress at all (so a section can never hang the demo forever).
+// `tick` returns true once the section has naturally finished on its own
+// (e.g. section_splash.c's fade-out completing) -- run_section() below
+// advances immediately when that happens, regardless of min_ticks/
+// max_ticks; a section with no natural end (the bird scene) simply
+// always returns false.
+typedef struct
+{
+    void (*init)(const HiresBitmap *screen);
+    bool (*tick)(const HiresBitmap *screen);
+    uint16_t min_ticks;
+    uint16_t max_ticks;
+} DemoSection;
+
+// Runs one section to completion: its own init, then tick+pace every
+// iteration until the section itself signals it's finished, a keypress
+// lands (once min_ticks has elapsed), or max_ticks is reached regardless.
+// keyb_check() is safe to call here even with hrirq_start() already
+// active -- keyboard.c's own keyb_scan() already brackets its VIA/AY
+// access with php/sei...plp internally (see that file), the exact
+// convention rasterirq.h's own header comment requires of anything
+// touching VIA Port A while interrupts are live.
+static void run_section(const DemoSection *section, const HiresBitmap *screen)
+{
+    uint16_t elapsed = 0;
+
+    section->init(screen);
+    for (;;)
+    {
+        uint8_t start_tick = main_frame_tick;
+        bool finished = section->tick(screen);
+
+        while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
+            ;
+
+        elapsed++;
+        if (finished)
+            return;
+        if (elapsed >= section->max_ticks)
+            return;
+        if (elapsed >= section->min_ticks && keyb_check())
+            return;
+    }
+}
+
+// Wraps the existing background/clouds/bird trio as a single section --
+// section_background_run() doubles as this section's own init (it was
+// always a one-shot draw, not persistent per-section state), same
+// ordering as before this refactor (background, then the TEXT footer,
+// then clouds, then bird). min_ticks/max_ticks are both set to
+// (effectively) "never" for now -- there is no other section yet for
+// this one to advance into, so this phase is a pure structural refactor,
+// not a behaviour change; real pacing numbers land once section #4
+// (the first showcase section) actually exists to advance into.
+#define SECTION_FOREVER 0xFFFFu
+
+static void bird_scene_init(const HiresBitmap *screen)
+{
+    section_background_run(screen);
+    section_clouds_init(screen);
+    section_bird_init(screen);
+}
+
+static bool bird_scene_tick(const HiresBitmap *screen)
+{
+    section_background_tick(screen);
+    section_clouds_tick(screen);
+    section_bird_tick(screen);
+    return false;   // no natural end -- runs until skipped or timed out
+}
+
+// idi8b splash: min_ticks keeps an impatient keypress from insta-skipping
+// before the logo has had a moment to render; max_ticks (~37s) is purely
+// a safety backstop -- the section almost always finishes on its own (its
+// own tick() returns true once the fade-out completes) well before this
+// would ever fire. Now a normal HIRES-mode section like any other (it
+// used to run outside the sections[] table, before hires_on() -- see git
+// history -- back when it was TEXT-mode content; moving it to HIRES mode
+// removed that whole special case).
+#define SPLASH_MIN_TICKS 20u
+#define SPLASH_MAX_TICKS 500u
+
+// The demo's own running order -- currently the idi8b splash followed by
+// the one existing scene; later phases insert the logo-intro between them
+// and the showcase sections/credits after (see this project's own
+// planning notes for the full list).
+static const DemoSection sections[] = {
+    { section_splash_init, section_splash_tick, SPLASH_MIN_TICKS, SPLASH_MAX_TICKS },
+    { bird_scene_init, bird_scene_tick, SECTION_FOREVER, SECTION_FOREVER },
+};
+#define NUM_SECTIONS (sizeof(sections) / sizeof(sections[0]))
+
 int main(void)
 {
-    hires_init();
-
-    // Background music, started FIRST -- before hb_init/hb_fill/hires_on/
-    // section_background_run below -- so it's audible from the very start
-    // of the demo, not just once the (visually much slower) background/
-    // footer setup below has already finished. Ticks at 50Hz via a raster
-    // IRQ (see docs/arkos.md and docs/rasterirq.md) -- entirely decoupled
-    // from every section's own animation timing; once started here it
-    // keeps playing regardless of what any section does afterward, for
-    // the demo's entire run. Silently does nothing if the music file
-    // isn't present (no LOCI device, or running a build where it wasn't
-    // shipped) -- see arkos_load()'s own graceful-failure behaviour. Has
-    // no dependency on the HIRES video setup below (arkos.c/rasterirq.c
-    // only ever touch the AY/VIA registers, never HIRESVRAM), so nothing
-    // is lost by moving it ahead of it.
+    // Background music, started FIRST -- before the idi8b splash below,
+    // and before hb_init/hb_fill/hires_on/section_background_run further
+    // down -- so it's audible from the very start of the demo, not just
+    // once the (visually much slower) splash/background/footer setup has
+    // already finished. Ticks at 50Hz via a raster IRQ (see docs/arkos.md
+    // and docs/rasterirq.md) -- entirely decoupled from every section's
+    // own animation timing; once started here it keeps playing regardless
+    // of what any section does afterward, for the demo's entire run.
+    // Silently does nothing if the music file isn't present (no LOCI
+    // device, or running a build where it wasn't shipped) -- see
+    // arkos_load()'s own graceful-failure behaviour. Has no dependency on
+    // TEXT or HIRES video state (arkos.c/rasterirq.c only ever touch the
+    // AY/VIA registers, never TEXTVRAM/HIRESVRAM), so nothing is lost by
+    // starting it this early.
     //
     // hrirq_init()/hrirq_add(main_frame_tick_isr)/hrirq_start() run
     // UNCONDITIONALLY now (previously only inside the arkos_load() branch,
-    // since only music needed them) -- the master loop's own frame-pacing
-    // below needs a working 50Hz tick regardless of whether music loaded,
-    // so interrupts get enabled even in the no-music case now. arkos_tick
+    // since only music needed them) -- run_section()'s own frame-pacing
+    // needs a working 50Hz tick regardless of whether music loaded, so
+    // interrupts get enabled even in the no-music case now. arkos_tick
     // itself is still only registered when arkos_load() actually succeeds.
     hrirq_init();
     if (arkos_load(MUSIC_FILE))
@@ -112,37 +218,59 @@ int main(void)
     hrirq_add(20, main_frame_tick_isr);
     hrirq_start();
 
+    hires_init();
+
     HiresBitmap screen;
     hb_init(&screen, (uint8_t *)HIRESVRAM, HIRES_ROWS);
     hb_fill(&screen, 0x40);   // real RAM isn't zero-initialized -- start blank
 
     hires_on(true);
 
-    // Draws the sky/bank/river background AND establishes a known
-    // white-ink baseline for every row (varying only PAPER by band) --
-    // sections that colour their own sprites (see section_bird.c's
-    // HxsprColor use) rely on ink being fixed/predictable to restore to,
-    // since ink/paper attributes cascade rightward from wherever they were
-    // last set (see hires.h). Must run before section_bird_run() draws on
-    // top of it.
-    section_background_run(&screen);
+    // Copy real charset data into HIRES_CHARSET_STD/ALT, right after
+    // hires_on() (which zeroes both, see hires.c's own comment) and
+    // before any section runs -- "charsets copied to RAM at boot", once,
+    // for the whole program's runtime, rather than any section reading
+    // charset data live from a source that isn't reliably valid (see
+    // hires.c's hb_put_chars() and assets/rom_charset.h's own comments
+    // for exactly why CHARSETROM/CHARSET_ALT aren't safe to read directly
+    // on either of this project's targets).
+    //   - HIRES_CHARSET_STD: the real Oric ROM's own standard 6x8 font
+    //     (assets/rom_charset.h), so hb_put_chars() (any section, not
+    //     just the splash) always has real glyph data to read. rom_charset
+    //     only holds the 96 PRINTABLE glyphs (CHARSETROM's own 0-based
+    //     convention), but HIRES_CHARSET_STD is a full 128-entry table
+    //     indexed from code 0 (hb_put_chars()'s own `ch*8` addressing,
+    //     matching real charset RAM layout) -- copied at offset 0x20*8
+    //     (0x100), not offset 0, leaving codes 0x00-0x1F as hires_on()'s
+    //     own zero-fill. Getting this offset wrong once already produced a
+    //     real, visible bug: every glyph shifted by 0x100 bytes, making
+    //     the footer's own blank CH_SPACE cells render some other, wrong,
+    //     non-blank shape instead.
+    //   - HIRES_CHARSET_ALT: only the 3 specific glyph codes
+    //     section_splash.c's mosaic wordmark actually uses
+    //     (assets/idi8b_altcharset.h), placed at their own code*8 offset
+    //     -- the rest of the bank stays blank (hires_on()'s own zero-fill),
+    //     since nothing else currently needs alt-charset content.
+    memcpy((void *)(HIRES_CHARSET_STD + 0x20 * 8), rom_charset, sizeof(rom_charset));
+    {
+        uint8_t i;
+        for (i = 0; i < 3; i++)
+            memcpy((void *)(HIRES_CHARSET_ALT + (uint16_t)idi8b_altcharset[i].code * 8),
+                   idi8b_altcharset[i].glyph, 8);
+    }
 
-    // Deliberately NOT calling hires_footer_enable() here: its 3-row TEXT
-    // footer reads glyph data from $B400/$B800 (see that function's own
-    // doc comment in hires.h for the full story) -- addresses that alias
-    // directly with this demo's own HIRES rows ~128-199 (the creek, and
-    // wherever the bird currently is). Enabling it would render footer
-    // "blank" characters as whatever pixel/attribute bytes are currently
-    // sitting in that part of the picture -- reported as "corruption in
-    // the lower border" running the real demo in Oricutron.
-    //
-    // The bottom 24 scanlines (3 TEXT rows, $BF68-$BFDF) still need
-    // explicit setup though, hires_footer_enable() or not: they render as
-    // TEXT mode UNCONDITIONALLY on real hardware (HIRES bitmap only ever
+    // The bottom 24 scanlines (3 TEXT rows, $BF68-$BFDF) need explicit
+    // setup before ANY section runs, splash included: they render as TEXT
+    // mode UNCONDITIONALLY on real hardware (HIRES bitmap only ever
     // covers 200 scanlines -- see hires_on()'s own doc comment), so
     // whatever's sitting there gets interpreted as character codes and
-    // rendered against whatever charset is active (which hires_on()
-    // already made blank). CH_SPACE for the character codes themselves,
+    // rendered against whatever charset is active. Previously done inside
+    // bird_scene_init() (section #2) -- moved here since the splash
+    // (section #1) showed this same uninitialized-footer garbage (a
+    // solid white block) before that ever ran. Deliberately NOT calling
+    // hires_footer_enable(): see that function's own doc comment in
+    // hires.h for why its own footer mechanism aliases with this demo's
+    // own HIRES content. CH_SPACE for the character codes themselves,
     // plus an explicit white-ink/black-paper attribute pair at the start
     // of each of the 3 rows (real Oric RAM isn't zero-initialized --
     // relying on the ULA's per-scanline reset alone isn't robust against
@@ -159,31 +287,17 @@ int main(void)
         }
     }
 
-    section_clouds_init(&screen);
-    section_bird_init(&screen);
-
-    // Master loop: each section owns its own state and pacing, called in
-    // turn every tick (see section_bird.h/section_clouds.h/
-    // section_background.h). Arkos playback stays fully decoupled from
-    // this, ticking via its own raster IRQ.
-    //
-    // The wait at the bottom paces each iteration to a fixed
-    // MAIN_FRAME_PACING_TICKS real 50Hz ticks (see that constant's own
-    // comment) -- (uint8_t)(main_frame_tick - start_tick) rather than a
-    // plain equality/greater-than check so it's correct across the
-    // counter's own 0-255 wraparound, and so an iteration whose real work
-    // already took longer than the target falls through immediately
-    // rather than waiting an extra ~256-tick wraparound.
+    // Runs the demo's own section table forever, one section at a time --
+    // each section owns its own state/pacing internally (see
+    // section_bird.h/section_clouds.h/section_background.h), run_section()
+    // above owns advancing between them. Arkos playback stays fully
+    // decoupled from all of this, ticking via its own raster IRQ
+    // regardless of which section is currently showing.
     for (;;)
     {
-        uint8_t start_tick = main_frame_tick;
-
-        section_background_tick(&screen);
-        section_clouds_tick(&screen);
-        section_bird_tick(&screen);
-
-        while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
-            ;
+        uint8_t i;
+        for (i = 0; i < NUM_SECTIONS; i++)
+            run_section(&sections[i], &screen);
     }
 
     return 0;
