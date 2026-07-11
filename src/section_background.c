@@ -88,13 +88,11 @@ static void draw_tree_ink(uint8_t x, uint8_t base_y)
     }
 }
 
-// The three trees' x positions -- shared between section_background_run()
-// below and section_background_refresh_tree_brackets() further down, so
-// both stay in sync automatically if these ever change. 31/125/199 keep
-// each tree's ink bracket (see draw_tree_ink()) clear of column-bytes 0-1
-// (the row's own baseline ink/paper attribute pair) and clear of each
-// other -- the widest (TREE_HALF_SPAN=13px) canopy's bracket columns land
-// at 2/8, 17/24, 30/36 respectively, all comfortably spaced.
+// The three trees' x positions -- 31/125/199 keep each tree's ink bracket
+// (see draw_tree_ink()) clear of column-bytes 0-1 (the row's own baseline
+// ink/paper attribute pair) and clear of each other -- the widest
+// (TREE_HALF_SPAN=13px) canopy's bracket columns land at 2/8, 17/24,
+// 30/36 respectively, all comfortably spaced.
 static const uint8_t tree_x[3] = { 31, 125, 199 };
 
 void section_background_run(const HiresBitmap *screen)
@@ -160,38 +158,6 @@ void section_background_run(const HiresBitmap *screen)
     draw_tree_ink(tree_x[0], BANK_TOP + 6);
     draw_tree_ink(tree_x[1], BANK_TOP + 6);
     draw_tree_ink(tree_x[2], BANK_TOP + 6);
-}
-
-// See section_background.h's own comment for why this exists (and its
-// known, accepted residual).
-bool section_background_tree_bracket_ink(uint8_t col, uint8_t row_min, uint8_t row_max, uint8_t *out_ink)
-{
-    uint8_t base_y = BANK_TOP + 6;
-    uint8_t top = (uint8_t)(base_y - TREE_HEIGHT);
-    uint8_t i;
-
-    for (i = 0; i < 3; i++)
-    {
-        uint8_t left_col = (uint8_t)((tree_x[i] - TREE_HALF_SPAN) / 6u);
-        uint8_t right_col = (uint8_t)((tree_x[i] + TREE_HALF_SPAN) / 6u);
-        uint8_t bracket_left = (uint8_t)(left_col - 1);
-        uint8_t bracket_right = (uint8_t)(right_col + 1);
-
-        if (row_max < top || row_min > base_y)
-            continue;   // no row overlap with this tree at all
-
-        if (col == bracket_left)
-        {
-            *out_ink = A_FWBLACK;
-            return true;
-        }
-        if (col == bracket_right)
-        {
-            *out_ink = A_FWWHITE;
-            return true;
-        }
-    }
-    return false;
 }
 
 // Scrolls the river band left by one column-byte, like
