@@ -11,9 +11,11 @@ tool — same byte format and the same per-scanline colour-attribute
 optimisation idea (`colored` mode, below) — but is a fresh Python
 implementation, not a port of that tool's C++ structure.
 
-Implemented so far: `mono`, `colored`, `aic`, `samhocevar`. Not implemented,
-with the actual reason for each (checked against pictconv's source, not
-assumed):
+Implemented so far: `mono`, `colored`, `aic`, `samhocevar`, `pictoric`
+(the last is a port of a *different* tool, Samuel Devulder's PictOric, not
+OSDK's own pictconv — see its own section below). Not implemented (OSDK
+pictconv modes only, from here on), with the actual reason for each
+(checked against pictconv's source, not assumed):
 
 - **`-f5`/`-f5z` charmap**: genuinely out of scope — it converts to a
   *character set + text-screen* representation (TEXT mode), not a HIRES
@@ -43,14 +45,16 @@ assumed):
 
 ```
 python3 tools/oric_pictconv.py INPUT OUTPUT
-  --mode {mono,colored,aic,samhocevar}       (default: mono)
-  --dither {none,ordered,floyd-steinberg}    (default: floyd-steinberg; ignored by samhocevar)
+  --mode {mono,colored,aic,samhocevar,pictoric}  (default: mono)
+  --dither {none,ordered,floyd-steinberg}    (default: floyd-steinberg; ignored by samhocevar/pictoric)
   --format {bin,header}                      (default: bin)
   --label NAME        C array name for --format header (default: oric_image)
   --ink/--paper NAME-OR-0-7      mono mode ink/paper (default: white/black)
   --aic-ink0/--aic-paper0/--aic-ink1/--aic-paper1
                        aic mode even/odd-row ink/paper (default: white/black, cyan/black)
   --samhocevar-depth N  samhocevar mode recursive lookahead depth (default: 2)
+  --no-inverse-attr    samhocevar/pictoric: disable the "inverse attribute
+                       byte" search candidates (see that section below)
 ```
 
 `--format bin` writes a flat 8000-byte stream matching `HIRESVRAM`'s
@@ -156,6 +160,15 @@ pointer arithmetic silently reading past its own buffer's real bounds near
 the right/left edges — undefined behaviour that Python's bounds-checked
 lists won't tolerate).
 
+The full 34-command search includes upstream's "inverse attribute byte"
+trick (writing an ink/paper-change byte with bit7 set). An earlier version
+of this port removed those 16 candidates on the assumption the mechanism
+was unconfirmed on real Oric hardware — that assumption was WRONG: bit7 on
+an attribute byte is a real, confirmed ULA behaviour (it inverts only that
+one byte's own displayed cell, without changing what ink/paper actually
+gets set going forward — see `include/oric.h`'s HIRES bitmap section for
+the confirming source). Restored once verified.
+
 **Expect real per-image runtimes in minutes, not seconds** — this is a
 pure-Python translation of an algorithm upstream itself describes as
 "much much slower than other methods," with no vectorization. `--dither`
@@ -169,6 +182,126 @@ plan). Sam's method earns its cost specifically on trickier, more
 continuous-tone source images where `mono`/`aic`/`colored` produce visible
 banding or noise — try the cheaper modes first and only reach for
 `samhocevar` if they fall short.
+
+## PictOric mode
+
+A port of a *different* tool from OSDK's own pictconv: Samuel "__sam__"
+Devulder's [PictOric](https://github.com/Samuel-DEVULDER/PictOric)
+(`PictOric.lua`, v1.2, 2019-2020) — a GrafX2-script / command-line Oric
+image converter, independently developed, with a genuinely different
+(and in two real ways, better) algorithm than every mode above:
+
+1. **Correct sRGB linearisation.** Every mode above (including
+   `samhocevar`) quantizes and diffuses error directly in sRGB
+   (gamma-encoded) space — a real, if usually minor, inaccuracy. PictOric
+   converts to linear light first (the standard sRGB inverse-EOTF
+   formula), does all colour-distance and error-diffusion maths there,
+   matching how the eye and the actual analogue video signal behave.
+2. **A genuinely optimal per-scanline search**, not just a deeper
+   lookahead. The key insight ("neglect cross-octet error"): if each
+   6-pixel block's own dithering error is computed using ONLY the error
+   carried in from the row *above* (never from a preceding block in the
+   *same* row), the total remaining error from block `x` to the end of
+   the row depends only on `(x, current ink, current paper)` — a small,
+   memoizable state space (40 blocks × 8 × 8 = 2560 states). That makes a
+   full recursive search over the *entire* row's ink/paper-change
+   sequence cheap and exactly optimal for that row, rather than
+   `colored` mode's budget-limited backtracking or `samhocevar`'s
+   fixed-small-depth lookahead. It's also why it's fast in practice —
+   typically a few seconds per image, not minutes.
+
+Close to a line-by-line port for the parts that matter (the sRGB
+formulas, the "redmean"-style perceptual distance PictOric calls
+`dist2_alg=1` — its own default — the 256-entry Ostromoukhov
+variable-coefficient error-diffusion table, extracted programmatically
+from the Lua source rather than hand-typed, and the `calcErr`/`findRec`
+recursive search itself). Deliberately **not** ported: PictOric's own
+image loading/resizing/centering (this project's own `load_and_fit()`
+already does that job for every mode here, so `pictoric` reuses it
+rather than adding a second, inconsistent resize path), its own AIC
+mode (`--mode aic` above already covers that use case), its CIE-Lab-based
+alternative distance metrics (not the tool's own default), and its
+BMP/TAP file writer and GrafX2 integration (irrelevant — this project has
+its own CLI/output format).
+
+`--dither` is ignored (same as `samhocevar` — the algorithm has its own
+built-in diffusion). `--no-inverse-attr` is shared with `samhocevar`, see
+the next section for why it exists.
+
+## The "inverse attribute byte" trade-off, and `--no-inverse-attr`
+
+Both `samhocevar` and `pictoric` rely on a real, hardware-confirmed
+mechanism: writing an ink/paper-change attribute byte with bit7 set makes
+that byte's own displayed cell show the *complement* of the new colour,
+without changing what ink/paper actually gets set going forward (see
+`include/oric.h`'s HIRES bitmap section). Both algorithms use this to
+"disguise" an attribute change as a colour the current block's content
+already needs, while quietly setting up a *different* ink/paper state for
+upcoming blocks.
+
+Comparing this project's `samhocevar`/`pictoric` output against a real
+published reference conversion (see "Verifying against upstream
+references" below) surfaced a genuine, concrete trade-off: on a real
+photographic portrait, both modes occasionally used this trick to lock an
+entire multi-block stretch of a row onto a badly-mismatched colour pair
+(observed: a stretch of warm skin/hair tones rendered using {white,
+cyan} — a jarring, clearly-wrong-looking result). Root cause, confirmed
+directly (not guessed): both algorithms' speed comes from a
+"neglect cross-block/cross-octet error" simplification — each block's own
+cost estimate assumes a fixed incoming error state from the row *above*
+only, never accounting for how a poor colour choice compounds across the
+many real pixels forced to use it in the blocks *after* it. A direct,
+non-recursive check confirmed the naive total error for the affected row
+segment was roughly **4x worse** under the colour pair the search actually
+picked than under the obviously-better alternative — yet the search
+(correctly, given its own simplified cost model) still preferred it,
+because the model doesn't know how badly that choice will compound.
+
+This is **not a bug to silently patch** — the inverse-attribute mechanism
+is real, and disabling it is a genuine reduction in search flexibility,
+not a pure improvement. It's exposed as an opt-out instead: pass
+`--no-inverse-attr` to drop those candidates from the search entirely.
+Confirmed to eliminate the artifact on the same troublesome reference
+photo, at the cost of a smaller solution space. Try it if a conversion
+shows an unexpected, wrong-hued streak that a mono/aic pass on the same
+image doesn't show.
+
+## Verifying against upstream references
+
+Both `samhocevar` and `pictoric` were checked against real, independently-
+published reference conversions, not just against each other:
+
+- **OSDK's own documentation page**
+  (`osdk.org/index.php?page=documentation&subpage=pictconv`) publishes a
+  source photo ("Buffy") alongside OSDK pictconv's own official `-f6`
+  output (`buffy_f6.png`). Fetching both and running this project's
+  `samhocevar`/`pictoric` against the same source photo confirmed: OSDK's
+  *own* official `-f6` reference is itself streaky/noisy on this
+  photographic portrait (not a clean result) — validating that the
+  noise seen on real photos throughout this project's own testing is
+  inherent to the technique/source-image mismatch, not a sign of a
+  broken port. `pictoric`'s result was notably closer in overall
+  character (colour balance, streak pattern, recognizability) to OSDK's
+  official reference than this project's own `samhocevar` port managed,
+  a real, useful data point in `pictoric`'s favour for photographic
+  subjects specifically.
+- **A hardware-behaviour correction found along the way**: verifying
+  `samhocevar` against real conversions (both OSDK's and PictOric's own,
+  which also relies on the same mechanism) surfaced a genuine mistake in
+  an earlier version of this project's own work — see `samhocevar`'s own
+  section above and `include/oric.h`'s HIRES bitmap section for the full
+  correction (an "inverse attribute byte" mechanism previously assumed
+  unconfirmed on real hardware, which turned out to be real and
+  documented after all).
+- **The cyan-streak finding**: this same Buffy comparison is what first
+  surfaced the "inverse attribute byte" trade-off documented in its own
+  section above — a user noticed the streaks in this project's own
+  conversion didn't match OSDK's reference, which prompted tracing the
+  actual cause rather than assuming it was ordinary photo-conversion
+  noise. Confirmed present in BOTH `samhocevar` and `pictoric`
+  (independently-implemented algorithms), confirmed via a direct,
+  non-recursive error calculation (not just visual impression), and
+  confirmed fixable via `--no-inverse-attr`.
 
 ## Testing
 

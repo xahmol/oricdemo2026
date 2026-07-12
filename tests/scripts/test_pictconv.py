@@ -27,7 +27,9 @@ Fixtures:
   (hires_test_input.png is reused for the aic-mode case too, with a
   white/black even-row pair and a cyan/red odd-row pair, and again for
   samhocevar mode at depth=1 -- see that case's own comment for why
-  depth=1, not the mode's own depth=2 default.)
+  depth=1, not the mode's own depth=2 default -- and again for pictoric
+  mode's own b/w case. hires_test_stripes.png is reused for pictoric
+  mode's own colour-attribute case too.)
 """
 
 import subprocess
@@ -82,6 +84,23 @@ CASES = [
         "input": FIXTURES / "hires_test_input.png",
         "args": ["--mode", "samhocevar", "--samhocevar-depth", "1"],
         "expected": FIXTURES / "hires_test_expected_samhocevar_depth1.bin",
+    },
+    {
+        # pictoric mode's own optimal-search default -- unlike samhocevar,
+        # there's no degenerate "depth=0" configuration to work around
+        # (the DP search is always exact for whatever state space it's
+        # given), and a full 240x200 image converts in ~2-3s, so this runs
+        # at the mode's real, only configuration.
+        "label": "pictoric mode (b/w split, matches mono's own split)",
+        "input": FIXTURES / "hires_test_input.png",
+        "args": ["--mode", "pictoric"],
+        "expected": FIXTURES / "hires_test_expected_pictoric.bin",
+    },
+    {
+        "label": "pictoric mode attribute optimizer (red/green/blue stripes)",
+        "input": FIXTURES / "hires_test_stripes.png",
+        "args": ["--mode", "pictoric"],
+        "expected": FIXTURES / "hires_test_expected_pictoric_stripes.bin",
     },
 ]
 

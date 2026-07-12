@@ -218,12 +218,18 @@ def convert_mono(img, ink, paper, dither):
 #      chance ("ink already happens to match"). This is a strict
 #      generalisation -- it can only find equal-or-better solutions.
 #   2. The original's "change paper using inverse video" branch (writing
-#      the attribute byte itself with bit7 set) is dropped: it reaches the
-#      same *future* colour state as directly writing the plain attribute
-#      for the complementary colour (already covered by trying all 8
-#      candidates), and its exact effect on the attribute byte's own
-#      displayed cell isn't confirmed by this project's hardware research
-#      -- not worth the uncertainty for a purely cosmetic edge case.
+#      the attribute byte itself with bit7 set, which -- CORRECTION, see
+#      samhocevar mode's own header comment and include/oric.h -- IS a
+#      real, hardware-confirmed mechanism: it inverts only that one
+#      attribute byte's own displayed cell, without changing what ink/paper
+#      actually gets set going forward) is still dropped here, but now for
+#      a narrower, still-valid reason: it's a genuinely SEPARATE state from
+#      "directly change paper to the complementary colour" (the inverse
+#      trick leaves the underlying paper value unchanged for future
+#      blocks, where a direct change would not), so dropping it is a real,
+#      if minor, search-space reduction -- not the false "unconfirmed
+#      hardware behaviour" reasoning this comment previously gave. Left as
+#      a possible future enhancement rather than added now.
 #
 # A block using >2 distinct colours is unrepresentable exactly (a HIRES
 # byte only has 2 "slots": bit-clear and bit-set); such a block's 3rd+
@@ -468,27 +474,53 @@ _SAM_CLAMP = 0x1000
 # per-channel directly).
 _SAM_PALETTE = [(r * 257, g * 257, b * 257) for _name, (r, g, b) in PALETTE]
 
-# Command lookup table -- a DELIBERATE reduction from upstream
-# oric_converter_samhocevar.cpp's own 34-entry `lookup[]`. Upstream's
-# fg/bg-change commands come in "direct" (0x00-0x17) and "inverse video"
-# (0x80-0x97) pairs: the "inverse" half assumes writing an attribute byte
-# with bit7 set makes THAT byte's own (blank) screen cell display as the
-# complementary colour instead of plain paper. This project's own HIRES
-# convention (include/oric.h) only ever documents bit7 ("invert") as
-# meaningful for PIXEL bytes (bit6=1) -- attribute bytes (bit6=0) are
-# never written with bit7 set anywhere in include/hires.c, and `colored`
-# mode's own header comment already flags this exact "inverse attribute
-# byte" mechanism as unconfirmed by this project's hardware research, for
-# the same reason. Including it here made bestmove() degenerate into only
-# ever picking attribute-change commands it (incorrectly, per our model)
-# believed already displayed the right colour, never falling back to
-# real pixel-printing -- confirmed via a failing test (an all-white test
-# block converted to a row of alternating attribute bytes, zero actual
-# pixels set). Dropped the 16 "inverse attribute" candidates entirely,
-# keeping direct fg-change (0x00-0x07), direct bg-change (0x10-0x17), and
-# both pixel-printing commands (0x40 plain / 0xc0 inverted -- 0xc0's
-# bit7-on-pixel-data meaning IS confirmed, see hires_invert_byte()).
+# Command lookup table, verbatim from oric_converter_samhocevar.cpp's own
+# 34-entry `lookup[]`: fg-change 0-7 direct (0x00-0x07) and "inverse video"
+# (0x80-0x87), bg-change 0-7 direct (0x10-0x17) and inverse (0x90-0x97),
+# then plain (0x40) / inverse (0xc0) pixel printing.
+#
+# CORRECTION (this table previously dropped the 16 "inverse attribute"
+# candidates as unconfirmed hardware behaviour -- that was WRONG, not a
+# safety fix; restored here). bit7 on an ATTRIBUTE byte (bit6=0) is a
+# real, confirmed Oric ULA behaviour, not something this project invented
+# or assumed: an attribute byte's own screen column normally displays as
+# a solid block of the CURRENT paper colour, and setting bit7 makes that
+# one column display as the COMPLEMENT of paper instead (colour XOR 7),
+# WITHOUT changing what ink/paper actually gets set for the rest of the
+# row -- see include/oric.h's own HIRES bitmap section for the confirming
+# source (Markku Reunanen's "Cracking the Oric hires" research) and the
+# git history of this exact comment for the investigation that corrected
+# this. This matches upstream's own `nvoidrgb = palette[7-bg]` exactly.
 _SAM_LOOKUP = (
+    0x00, 0x04, 0x01, 0x05, 0x02, 0x06, 0x03, 0x07,
+    0x80, 0x84, 0x81, 0x85, 0x82, 0x86, 0x83, 0x87,
+    0x10, 0x14, 0x11, 0x15, 0x12, 0x16, 0x13, 0x17,
+    0x90, 0x94, 0x91, 0x95, 0x92, 0x96, 0x93, 0x97,
+    0x40, 0xc0,
+)
+
+# `--no-inverse-attr` variant: drops the 16 "inverse attribute" candidates
+# above. NOT a correctness fix (the mechanism IS real, see the comment
+# above) -- a real, separate finding from comparing this project's own
+# samhocevar/pictoric output against upstream reference conversions of a
+# genuine photographic portrait: the "neglect cross-octet/cross-block
+# error" simplification BOTH this algorithm and PictOric's own (see
+# convert_pictoric below) rely on for speed can, combined with the
+# inverse-attribute trick, occasionally lock an entire multi-block stretch
+# of a row onto a badly-mismatched colour pair for many pixels in a row --
+# because the search's own per-block cost estimate doesn't account for how
+# a poor colour choice compounds across the many REAL pixels forced to use
+# it afterward, only for the ONE block that changed the attribute. Verified
+# concretely: naive total error for a real troublesome image row, computed
+# directly (bypassing the recursive search entirely), was ~4x WORSE for
+# the colour pair the search actually picked than for the colour pair a
+# human would obviously prefer -- confirmed present in BOTH this mode and
+# `pictoric` (independently-implemented, structurally different
+# algorithms), and confirmed to disappear when the inverse-attribute
+# candidates are excluded. Not a bug to silently "fix" (it's a genuine,
+# occasionally-worthwhile trade-off, and disabling it does reduce the
+# search's solution space) -- exposed as an opt-out instead.
+_SAM_LOOKUP_NO_INVERSE_ATTR = (
     0x00, 0x04, 0x01, 0x05, 0x02, 0x06, 0x03, 0x07,
     0x10, 0x14, 0x11, 0x15, 0x12, 0x16, 0x13, 0x17,
     0x40, 0xc0,
@@ -594,17 +626,18 @@ def _sam_geterror(in_, inerr, out):
     return ret, tmperr[0:3]
 
 
-def _sam_bestmove(in_, bg, fg, errvec, depth):
-    """Recursive lookahead search over the reduced candidate command set
-    (see _SAM_LOOKUP -- upstream had 34, this project's own hardware model
-    only confirms half of them, see that table's own comment). Returns
-    (command, error, out_rgb) -- out_rgb is the 18 chosen output pixel
-    values (6 pixels x 3 channels) for the CURRENT block only."""
+def _sam_bestmove(in_, bg, fg, errvec, depth, lookup=_SAM_LOOKUP):
+    """Recursive lookahead search over the candidate command set (`lookup`
+    -- see _SAM_LOOKUP / _SAM_LOOKUP_NO_INVERSE_ATTR). Returns (command,
+    error, out_rgb) -- out_rgb is the 18 chosen output pixel values (6
+    pixels x 3 channels) for the CURRENT block only."""
     voidrgb = _SAM_PALETTE[bg]
     voide, voidvec = _sam_geterror(in_, errvec, voidrgb * 6)
+    nvoidrgb = _SAM_PALETTE[7 - bg]
+    nvoide, nvoidvec = _sam_geterror(in_, errvec, nvoidrgb * 6)
 
     if depth > 0:
-        _cmd, statice, _rgb = _sam_bestmove(in_[18:], bg, fg, (0, 0, 0), depth - 1)
+        _cmd, statice, _rgb = _sam_bestmove(in_[18:], bg, fg, (0, 0, 0), depth - 1, lookup)
     else:
         statice = 0
 
@@ -612,7 +645,7 @@ def _sam_bestmove(in_, bg, fg, errvec, depth):
     bestcommand = 0x10
     bestrgb = list(voidrgb) * 6
 
-    for command in _SAM_LOOKUP:
+    for command in lookup:
         newbg, newfg = _sam_domove(command, bg, fg)
 
         if (command & 0x40) == 0x00 and newbg == bg and newfg == fg:
@@ -620,8 +653,13 @@ def _sam_bestmove(in_, bg, fg, errvec, depth):
 
         if (command & 0xf8) == 0x00:
             curerror, rgb, vec = voide, voidrgb * 6, voidvec
+        elif (command & 0xf8) == 0x80:
+            curerror, rgb, vec = nvoide, nvoidrgb * 6, nvoidvec
         elif (command & 0xf8) == 0x10:
             rgb = _SAM_PALETTE[newbg] * 6
+            curerror, vec = _sam_geterror(in_, errvec, rgb)
+        elif (command & 0xf8) == 0x90:
+            rgb = _SAM_PALETTE[7 - newbg] * 6
             curerror, vec = _sam_geterror(in_, errvec, rgb)
         else:
             if (command & 0x80) == 0x00:
@@ -667,7 +705,7 @@ def _sam_bestmove(in_, bg, fg, errvec, depth):
         if depth == 0:
             suberror = 0
         elif (command & 0x68) == 0x00:
-            _cmd, suberror, _rgb = _sam_bestmove(in_[18:], newbg, newfg, vec, depth - 1)
+            _cmd, suberror, _rgb = _sam_bestmove(in_[18:], newbg, newfg, vec, depth - 1, lookup)
             if newbg != bg:
                 suberror = _sam_tdiv(suberror * 10, 8)
             elif newfg != fg:
@@ -683,9 +721,10 @@ def _sam_bestmove(in_, bg, fg, errvec, depth):
     return bestcommand, besterror, bestrgb
 
 
-def convert_samhocevar(img, depth=_SAM_DEPTH_DEFAULT, progress=False):
+def convert_samhocevar(img, depth=_SAM_DEPTH_DEFAULT, progress=False, allow_inverse_attr=True):
     width, height = HIRES_WIDTH_PX, HIRES_ROWS
     px = img.load()
+    lookup = _SAM_LOOKUP if allow_inverse_attr else _SAM_LOOKUP_NO_INVERSE_ATTR
 
     # See this section's own header comment (deviation #2): generous
     # zero-filled margin on all sides, sized to the worst-case lookahead
@@ -719,7 +758,7 @@ def convert_samhocevar(img, depth=_SAM_DEPTH_DEFAULT, progress=False):
             x = cx * 6
             base = row_off + (x + pad_l) * 3
             in_ = src[base: base + lookahead_len]
-            command, _err, outrgb = _sam_bestmove(in_, bg, fg, (0, 0, 0), depth)
+            command, _err, outrgb = _sam_bestmove(in_, bg, fg, (0, 0, 0), depth, lookup)
 
             for c in range(3):
                 for i in range(6):
@@ -735,6 +774,410 @@ def convert_samhocevar(img, depth=_SAM_DEPTH_DEFAULT, progress=False):
 
             bg, fg = _sam_domove(command, bg, fg)
             out[y * HIRES_ROW_BYTES + cx] = command
+
+    if progress:
+        print(file=sys.stderr)
+
+    return bytes(out)
+
+
+# -------------------------------------------------------------------------
+# pictoric mode: a close port of Samuel "__sam__" Devulder's PictOric.lua
+# (github.com/Samuel-DEVULDER/PictOric, v1.2, 2019-2020), a GrafX2-script/
+# command-line Oric image converter distinct from OSDK's own pictconv (the
+# common ancestor for mono/colored/aic/samhocevar above). Two things set
+# it apart from every mode above:
+#
+#   1. Correct sRGB linearisation before ANY colour maths (distance,
+#      dithering) -- mono/colored/aic/samhocevar all quantize/diffuse
+#      directly in sRGB (gamma-encoded) space, which is a real, if minor,
+#      inaccuracy every other mode here shares. samhocevar's own gamma
+#      tables approximate this for its own perceptual-error term only,
+#      not its actual colour distances.
+#   2. A genuinely OPTIMAL per-scanline search (not `colored` mode's
+#      budget-limited backtracking, nor samhocevar's fixed-small-depth
+#      lookahead): Devulder's key insight ("neglect cross-octet error")
+#      is that if each 6-pixel block's own dithering error is computed
+#      using ONLY the error carried in from the row ABOVE (never from a
+#      preceding block in the SAME row), then the total error from block
+#      x to the end of the row depends only on (x, current ink, current
+#      paper) -- a small, memoizable state space (40 blocks x 8 x 8 = 2560
+#      states) -- so a full recursive search over the ENTIRE row's
+#      ink/paper-change sequence becomes cheap, polynomial-time, and
+#      genuinely optimal for that row (not just "good enough within a
+#      budget"). This is also why it's fast: no minutes-long runtime like
+#      samhocevar, typically seconds per image.
+#
+# Faithful to the original: the sRGB<->linear formulas, the "redmean"-style
+# perceptual distance (`dist2_alg=1`, PictOric's own default -- its three
+# CIE-Lab-based alternatives and its second Euclidean variant are NOT
+# ported, since they're not the tool's own default and add real
+# complexity for an alternative the tool's own author doesn't use by
+# default), the 256-entry Ostromoukhov variable-coefficient error-diffusion
+# table (extracted programmatically from the Lua source, not hand-typed,
+# to avoid transcription error) and its exact diffuse()/calcErr()/findRec()
+# logic, and the real per-pixel serpentine (alternating scan direction)
+# dithering pass once each row's optimal block sequence is known.
+#
+# Deliberately NOT ported:
+#   - PictOric's own image loading/resize/centering (`to_screen`/
+#     `getLinearPixel`'s box-filter averaging) and its "auto blank margin"
+#     heuristic (a one-off tuned for a specific Space1999 title screen) --
+#     this project's own `load_and_fit()` already does aspect-preserving
+#     scaling/letterboxing for every mode here, so pictoric mode reuses
+#     that instead of adding a second, inconsistent resize code path.
+#   - PictOric's own AIC mode (`--mode aic` above already covers the AIC
+#     use case, with its own simpler fixed-per-parity-pair approach).
+#   - The BMP/TAP file writer, GrafX2 script integration, and command-line
+#     argument handling -- irrelevant here, this project has its own CLI.
+# -------------------------------------------------------------------------
+
+_PICTORIC_ERR_ATT = 0.998  # PictOric's own err_att default
+
+# sRGB -> linear-light, exact formula from PictOric.lua's Color:toLinear()
+# (the "https://fr.wikipedia.org/wiki/SRGB#Transformation_inverse" one it
+# says "works much better" than the simpler approximation it also tried).
+def _pictoric_srgb_to_linear(v8):
+    v = v8 / 255.0
+    if v <= 0.04045:
+        return v / 12.92
+    return ((v + 0.055) / 1.055) ** 2.4
+
+
+_PICTORIC_LINEAR_LUT = [_pictoric_srgb_to_linear(i) for i in range(256)]
+
+# Oric's 8-colour palette in linear-light space, reusing this project's own
+# PALETTE table (each channel is already pure 0 or 255, so linearising is
+# just a lookup) rather than redefining it.
+_PICTORIC_PALETTE = [
+    tuple(_PICTORIC_LINEAR_LUT[ch] for ch in rgb) for _name, rgb in PALETTE
+]
+
+
+def _pictoric_dist2(c1, c2):
+    """PictOric's dist2_alg=1 (its own default): a cheap "redmean"-style
+    perceptual RGB distance -- weights R/B by mean lightness, G always
+    weighted highest, better matching human colour perception than plain
+    Euclidean distance. Operates in LINEAR space (0..1 floats)."""
+    r_mean = (c1[0] + c2[0]) * 0.5
+    if r_mean < 0.0:
+        r_mean = 0.0
+    elif r_mean > 1.0:
+        r_mean = 1.0
+    dr = c1[0] - c2[0]
+    dg = c1[1] - c2[1]
+    db = c1[2] - c2[2]
+    return dr * dr * (2 + r_mean) + dg * dg * 4 + db * db * (3 - r_mean)
+
+
+# Ostromoukhov variable-coefficient error-diffusion table (Victor
+# Ostromoukhov, SIGGRAPH 2001) -- 256 raw (a,b,c) integer triples, one per
+# possible 8-bit source-channel intensity, extracted programmatically from
+# PictOric.lua's own `local t = {...}` (not hand-transcribed). Diffusion
+# targets, in order: same-row next pixel, next-row pixel behind (in scan
+# direction), next-row same column.
+_PICTORIC_OSTRO_RAW = (
+    13, 0, 5, 13, 0, 5, 21, 0, 10, 7, 0, 4,
+    8, 0, 5, 47, 3, 28, 23, 3, 13, 15, 3, 8,
+    22, 6, 11, 43, 15, 20, 7, 3, 3, 501, 224, 211,
+    249, 116, 103, 165, 80, 67, 123, 62, 49, 489, 256, 191,
+    81, 44, 31, 483, 272, 181, 60, 35, 22, 53, 32, 19,
+    237, 148, 83, 471, 304, 161, 3, 2, 1, 459, 304, 161,
+    38, 25, 14, 453, 296, 175, 225, 146, 91, 149, 96, 63,
+    111, 71, 49, 63, 40, 29, 73, 46, 35, 435, 272, 217,
+    108, 67, 56, 13, 8, 7, 213, 130, 119, 423, 256, 245,
+    5, 3, 3, 281, 173, 162, 141, 89, 78, 283, 183, 150,
+    71, 47, 36, 285, 193, 138, 13, 9, 6, 41, 29, 18,
+    36, 26, 15, 289, 213, 114, 145, 109, 54, 291, 223, 102,
+    73, 57, 24, 293, 233, 90, 21, 17, 6, 295, 243, 78,
+    37, 31, 9, 27, 23, 6, 149, 129, 30, 299, 263, 54,
+    75, 67, 12, 43, 39, 6, 151, 139, 18, 303, 283, 30,
+    38, 36, 3, 305, 293, 18, 153, 149, 6, 307, 303, 6,
+    1, 1, 0, 101, 105, 2, 49, 53, 2, 95, 107, 6,
+    23, 27, 2, 89, 109, 10, 43, 55, 6, 83, 111, 14,
+    5, 7, 1, 172, 181, 37, 97, 76, 22, 72, 41, 17,
+    119, 47, 29, 4, 1, 1, 4, 1, 1, 4, 1, 1,
+    4, 1, 1, 4, 1, 1, 4, 1, 1, 4, 1, 1,
+    4, 1, 1, 4, 1, 1, 65, 18, 17, 95, 29, 26,
+    185, 62, 53, 30, 11, 9, 35, 14, 11, 85, 37, 28,
+    55, 26, 19, 80, 41, 29, 155, 86, 59, 5, 3, 2,
+    5, 3, 2, 5, 3, 2, 5, 3, 2, 5, 3, 2,
+    5, 3, 2, 5, 3, 2, 5, 3, 2, 5, 3, 2,
+    5, 3, 2, 5, 3, 2, 5, 3, 2, 5, 3, 2,
+    305, 176, 119, 155, 86, 59, 105, 56, 39, 80, 41, 29,
+    65, 32, 23, 55, 26, 19, 335, 152, 113, 85, 37, 28,
+    115, 48, 37, 35, 14, 11, 355, 136, 109, 30, 11, 9,
+    365, 128, 107, 185, 62, 53, 25, 8, 7, 95, 29, 26,
+    385, 112, 103, 65, 18, 17, 395, 104, 101, 4, 1, 1,
+    4, 1, 1, 395, 104, 101, 65, 18, 17, 385, 112, 103,
+    95, 29, 26, 25, 8, 7, 185, 62, 53, 365, 128, 107,
+    30, 11, 9, 355, 136, 109, 35, 14, 11, 115, 48, 37,
+    85, 37, 28, 335, 152, 113, 55, 26, 19, 65, 32, 23,
+    80, 41, 29, 105, 56, 39, 155, 86, 59, 305, 176, 119,
+    5, 3, 2, 5, 3, 2, 5, 3, 2, 5, 3, 2,
+    5, 3, 2, 5, 3, 2, 5, 3, 2, 5, 3, 2,
+    5, 3, 2, 5, 3, 2, 5, 3, 2, 5, 3, 2,
+    5, 3, 2, 155, 86, 59, 80, 41, 29, 55, 26, 19,
+    85, 37, 28, 35, 14, 11, 30, 11, 9, 185, 62, 53,
+    95, 29, 26, 65, 18, 17, 4, 1, 1, 4, 1, 1,
+    4, 1, 1, 4, 1, 1, 4, 1, 1, 4, 1, 1,
+    4, 1, 1, 4, 1, 1, 4, 1, 1, 119, 47, 29,
+    72, 41, 17, 97, 76, 22, 172, 181, 37, 5, 7, 1,
+    83, 111, 14, 43, 55, 6, 89, 109, 10, 23, 27, 2,
+    95, 107, 6, 49, 53, 2, 101, 105, 2, 1, 1, 0,
+    307, 303, 6, 153, 149, 6, 305, 293, 18, 38, 36, 3,
+    303, 283, 30, 151, 139, 18, 43, 39, 6, 75, 67, 12,
+    299, 263, 54, 149, 129, 30, 27, 23, 6, 37, 31, 9,
+    295, 243, 78, 21, 17, 6, 293, 233, 90, 73, 57, 24,
+    291, 223, 102, 145, 109, 54, 289, 213, 114, 36, 26, 15,
+    41, 29, 18, 13, 9, 6, 285, 193, 138, 71, 47, 36,
+    283, 183, 150, 141, 89, 78, 281, 173, 162, 5, 3, 3,
+    423, 256, 245, 213, 130, 119, 13, 8, 7, 108, 67, 56,
+    435, 272, 217, 73, 46, 35, 63, 40, 29, 111, 71, 49,
+    149, 96, 63, 225, 146, 91, 453, 296, 175, 38, 25, 14,
+    459, 304, 161, 3, 2, 1, 471, 304, 161, 237, 148, 83,
+    53, 32, 19, 60, 35, 22, 483, 272, 181, 81, 44, 31,
+    489, 256, 191, 123, 62, 49, 165, 80, 67, 249, 116, 103,
+    501, 224, 211, 7, 3, 3, 43, 15, 20, 22, 6, 11,
+    15, 3, 8, 23, 3, 13, 47, 3, 28, 8, 0, 5,
+    7, 0, 4, 21, 0, 10, 13, 0, 5, 13, 0, 5,
+)
+
+
+def _pictoric_build_ostro_table():
+    table = []
+    for i in range(0, len(_PICTORIC_OSTRO_RAW), 3):
+        a, b, c = _PICTORIC_OSTRO_RAW[i:i + 3]
+        d = 1.0 / (a + b + c)
+        table.append((a * d, b * d, c * d))
+    return table
+
+
+_PICTORIC_T1, _PICTORIC_T2 = 0.5, 0.667
+
+
+def _pictoric_f(x):
+    """PictOric's own error-reshaping function (the one non-commented-out
+    branch of its `f(x)` closure): a soft, piecewise-linear clamp that
+    caps the diffused error's growth once it exceeds T1, letting it
+    "catch up" again past T2 -- an empirically-tuned anti-runaway measure,
+    not a physically-derived formula."""
+    if x < 0:
+        return -_pictoric_f(-x)
+    if x < _PICTORIC_T1:
+        return x
+    if x < _PICTORIC_T2:
+        return _PICTORIC_T1
+    if x < 1 + _PICTORIC_T2 - _PICTORIC_T1:
+        return x - _PICTORIC_T2 + _PICTORIC_T1
+    return 1.0
+
+
+def _pictoric_ostro_index(channel_value):
+    idx = int(1.5 + 255 * channel_value)
+    if idx < 0:
+        return 0
+    if idx >= 256:
+        return 255
+    return idx
+
+
+def _pictoric_diffuse_eval(ostro, col, err):
+    """calcErr()'s own internal single-value error carry (PictOric's
+    `diffuse(self, col, err)` with no err0/err1/err2) -- mutates `err` in
+    place for the NEXT pixel of the SAME 6-pixel block being evaluated,
+    never touching the image's real, persistent error buffers."""
+    z = max(col[0], col[1], col[2])
+    z = 1 + (_PICTORIC_ERR_ATT - 1) * z
+    for ch in range(3):
+        e = _pictoric_f(err[ch] * z)
+        coefs = ostro[_pictoric_ostro_index(col[ch])]
+        err[ch] = e * coefs[0]
+
+
+def _pictoric_diffuse_real(ostro, col, err, target0, target1, target2):
+    """The REAL, persistent 3-way diffusion pass (PictOric's `diffuse(self,
+    col, err, err0, err1, err2)`): same-row next pixel, next-row pixel
+    behind (scan direction), next-row same column. Any target that is
+    None (off the edge of the image) is simply skipped."""
+    z = max(col[0], col[1], col[2])
+    z = 1 + (_PICTORIC_ERR_ATT - 1) * z
+    for ch in range(3):
+        e = _pictoric_f(err[ch] * z)
+        coefs = ostro[_pictoric_ostro_index(col[ch])]
+        if target0 is not None:
+            target0[ch] += e * coefs[0]
+        if target1 is not None:
+            target1[ch] += e * coefs[1]
+        target2[ch] += e * coefs[2]
+
+
+def convert_pictoric(img, progress=False, allow_inverse_attr=True):
+    width, height = HIRES_WIDTH_PX, HIRES_ROWS
+    px = img.load()
+    num_blocks = width // 6
+
+    src_lin = [[None] * width for _ in range(height)]
+    for y in range(height):
+        for x in range(width):
+            r, g, b = px[x, y]
+            src_lin[y][x] = (
+                _PICTORIC_LINEAR_LUT[r], _PICTORIC_LINEAR_LUT[g], _PICTORIC_LINEAR_LUT[b],
+            )
+
+    ostro = _pictoric_build_ostro_table()
+    palette = _PICTORIC_PALETTE
+
+    err1 = [[0.0, 0.0, 0.0] for _ in range(width)]
+    err2 = [[0.0, 0.0, 0.0] for _ in range(width)]
+
+    out = bytearray(HIRES_SIZE)
+
+    for y in range(height):
+        if progress:
+            print(f"\rpictoric: row {y + 1}/{height}", end="", file=sys.stderr)
+
+        row_pixels = src_lin[y]
+        line_cache = {}
+        block_cache = {}
+
+        def calc_err(x0, fg_idx, bg_idx, row_pixels=row_pixels, err1=err1, line_cache=line_cache):
+            key = (x0, fg_idx, bg_idx) if fg_idx <= bg_idx else (x0, bg_idx, fg_idx)
+            cached = line_cache.get(key)
+            if cached is not None:
+                return cached
+            fgc, bgc = palette[fg_idx], palette[bg_idx]
+            e = [0.0, 0.0, 0.0]
+            total = 0.0
+            base = x0 * 6
+            for i in range(6):
+                x = base + i
+                p = row_pixels[x]
+                top = err1[x]
+                e = [e[c] + top[c] + p[c] for c in range(3)]
+                d_fg = _pictoric_dist2(e, fgc)
+                chosen, d = fgc, d_fg
+                if bg_idx != fg_idx:
+                    d_bg = _pictoric_dist2(e, bgc)
+                    if d_bg < d:
+                        chosen, d = bgc, d_bg
+                total += d
+                e = [e[c] - chosen[c] for c in range(3)]
+                _pictoric_diffuse_eval(ostro, p, e)
+            line_cache[key] = total
+            return total
+
+        def find_rec(x, ink, pap, block_cache=block_cache):
+            if x >= num_blocks:
+                return 0.0, 64
+            key = (x, ink, pap)
+            cached = block_cache.get(key)
+            if cached is not None:
+                return cached
+
+            future0, _c0 = find_rec(x + 1, ink, pap)
+            t = calc_err(x, ink, pap) + future0
+            c = 64
+            if ink + pap != 7:
+                u = calc_err(x, 7 - ink, 7 - pap) + future0
+                if u < t:
+                    t, c = u, 192
+
+            v = calc_err(x, 7 - pap, 7 - pap)
+            u = calc_err(x, pap, pap)
+            w = 0
+            if allow_inverse_attr and v < u:
+                u, w = v, 128
+            if u < t:
+                for i in range(8):
+                    if i != ink:
+                        fut, _c1 = find_rec(x + 1, i, pap)
+                        vv = u + fut
+                        if vv < t:
+                            t, c = vv, w + i
+
+            for i in range(8):
+                if i != pap:
+                    fut, _c2 = find_rec(x + 1, ink, i)
+                    if fut < t:
+                        v1 = calc_err(x, i, i) + fut
+                        if v1 < t:
+                            t, c = v1, 16 + i
+                        if allow_inverse_attr:
+                            v2 = calc_err(x, 7 - i, 7 - i) + fut
+                            if v2 < t:
+                                t, c = v2, 128 + 16 + i
+
+            block_cache[key] = (t, c)
+            return t, c
+
+        # Decode the optimal per-block command sequence into fg/bg/cmd,
+        # walking forward with the actually-chosen ink/paper state (cache
+        # hits from find_rec's own recursive exploration, not fresh work).
+        blocks = [None] * num_blocks
+        ink, pap = DEFAULT_INK, DEFAULT_PAPER
+        for x0 in range(num_blocks):
+            _t, c = find_rec(x0, ink, pap)
+            inverse = c >= 128
+            cc = c - 128 if inverse else c
+            if cc == 64:
+                fg = (7 - ink) if inverse else ink
+                bg = (7 - pap) if inverse else pap
+                raw_cmd = 192 if inverse else 64
+            else:
+                if cc < 8:
+                    ink = cc
+                else:
+                    pap = cc - 16
+                fg = (7 - pap) if inverse else pap
+                bg = fg
+                raw_cmd = cc + (128 if inverse else 0)
+            blocks[x0] = {"fg": fg, "bg": bg, "cmd": raw_cmd}
+
+        # Real per-pixel serpentine dithering pass over the row, now that
+        # every block's (fg, bg) pair is fixed.
+        if y % 2 == 0:
+            x_range = range(0, width, 1)
+        else:
+            x_range = range(width - 1, -1, -1)
+        step = 1 if y % 2 == 0 else -1
+
+        for x in x_range:
+            block = blocks[x // 6]
+            p = row_pixels[x]
+            top = err1[x]
+            e = [top[c] + p[c] for c in range(3)]
+            fg_idx, bg_idx = block["fg"], block["bg"]
+            fgc, bgc = palette[fg_idx], palette[bg_idx]
+            d_fg = _pictoric_dist2(e, fgc)
+            if fg_idx != bg_idx:
+                d_bg = _pictoric_dist2(e, bgc)
+                use_fg = d_fg <= d_bg
+            else:
+                use_fg = True
+            chosen_idx = fg_idx if use_fg else bg_idx
+            chosen_c = fgc if use_fg else bgc
+
+            if use_fg and (block["cmd"] % 128) >= 64:
+                block["cmd"] |= 1 << (5 - (x % 6))
+
+            resid = [e[c] - chosen_c[c] for c in range(3)]
+            nx = x + step
+            target0 = err1[nx] if 0 <= nx < width else None
+            tb = x - step
+            target1 = err2[tb] if 0 <= tb < width else None
+            target2 = err2[x]
+            _pictoric_diffuse_real(ostro, p, resid, target0, target1, target2)
+
+        row_off = y * HIRES_ROW_BYTES
+        for x0 in range(num_blocks):
+            out[row_off + x0] = blocks[x0]["cmd"] & 0xFF
+
+        err1, err2 = err2, err1
+        for i in range(width):
+            err2[i][0] = 0.0
+            err2[i][1] = 0.0
+            err2[i][2] = 0.0
 
     if progress:
         print(file=sys.stderr)
@@ -773,7 +1216,7 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", help="source image (JPG/PNG/...)")
     ap.add_argument("output", help="output file (.bin or .h, see --format)")
-    ap.add_argument("--mode", choices=["mono", "colored", "aic", "samhocevar"], default="mono")
+    ap.add_argument("--mode", choices=["mono", "colored", "aic", "samhocevar", "pictoric"], default="mono")
     ap.add_argument("--dither", choices=list(DITHERERS), default="floyd-steinberg")
     ap.add_argument("--format", choices=["bin", "header"], default="bin")
     ap.add_argument("--label", default="oric_image", help="C array name for --format header")
@@ -790,6 +1233,15 @@ def main():
                           "3 is documented as better but slower still). Expect real per-image "
                           "runtimes of minutes, not seconds -- this mode is a much slower, "
                           "much more thorough search than colored/aic.")
+    ap.add_argument("--no-inverse-attr", action="store_true",
+                     help="samhocevar/pictoric modes: disable the 'inverse attribute byte' "
+                          "search candidates. This is a REAL, hardware-confirmed mechanism "
+                          "(not a bug), but combined with these modes' own per-block/per-row "
+                          "cost approximation, it can occasionally lock a long stretch of a "
+                          "row onto a badly-mismatched colour pair on tricky photographic "
+                          "source images (confirmed concretely against a real reference "
+                          "photo -- see docs/pictconv.md). Try this flag if a conversion shows "
+                          "an unexpected, jarringly-wrong-hued streak.")
     args = ap.parse_args()
 
     if args.width != HIRES_WIDTH_PX or args.height != HIRES_ROWS:
@@ -806,7 +1258,10 @@ def main():
     elif args.mode == "aic":
         data = convert_aic(img, args.aic_ink0, args.aic_paper0, args.aic_ink1, args.aic_paper1, args.dither)
     elif args.mode == "samhocevar":
-        data = convert_samhocevar(img, depth=args.samhocevar_depth, progress=True)
+        data = convert_samhocevar(img, depth=args.samhocevar_depth, progress=True,
+                                   allow_inverse_attr=not args.no_inverse_attr)
+    elif args.mode == "pictoric":
+        data = convert_pictoric(img, progress=True, allow_inverse_attr=not args.no_inverse_attr)
     else:
         print(f"ERROR: --mode {args.mode} not implemented yet", file=sys.stderr)
         return 1

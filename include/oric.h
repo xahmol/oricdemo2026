@@ -112,6 +112,23 @@ typedef volatile struct {
 // the byte as a serial attribute per the (byte & 0x60) == 0 rule below),
 // bits5-0 = 6 pixels, bit5 = leftmost. All-ink byte = 0x7F, all-paper = 0x40.
 //
+// bit7 ALSO has a confirmed, real effect on an ATTRIBUTE byte (bit6=0),
+// not just on pixel bytes: an attribute byte's own screen column normally
+// displays as a solid block of the CURRENT paper colour (see "Serial
+// attribute codes" below); with bit7 set, that one column instead displays
+// as the COMPLEMENT of the current paper colour (black<->white, red<->cyan,
+// green<->magenta, yellow<->blue -- i.e. XOR 7 on the 3-bit colour index).
+// Critically, bit7 does NOT change what ink/paper actually GETS SET for the
+// rest of the row -- "change ink to red, bit7 set" still sets ink=red for
+// subsequent columns; only that one attribute byte's own displayed cell is
+// inverted. Source: Markku Reunanen's "Cracking the Oric hires" (kameli.net),
+// cross-checked against real conversion tools that rely on this (OSDK
+// pictconv's oric_converter_samhocevar.cpp, Samuel Devulder's PictOric.lua)
+// -- confirmed via this project's own tools/oric_pictconv.py samhocevar
+// mode, which initially DISABLED this mechanism on the (wrong) assumption
+// it was unconfirmed, then re-enabled it once this hardware behaviour was
+// properly verified.
+//
 // $BF40-$BF67 (42 bytes) are unused, then a built-in 3-line TEXT footer at
 // HIRES_FOOTER ($BF68-$BFDF, 120 bytes), rendered with normal TEXT-mode
 // rules using the HIRES-mode charset banks below.
