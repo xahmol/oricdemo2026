@@ -1841,6 +1841,39 @@ route around the buggy call site instead (here: replaced a
 blockier visual result). Full write-up: `~/.claude/oscar64.md`'s same
 entry family.
 
+**Fifth session, fourth symptom shape (2026-07-12): a working function can
+break when UNRELATED code is added elsewhere, and live per-tick counters
+can produce false alarms.** A wireframe 3D mesh renderer (`hb_line()` in a
+loop, driven by a per-tick state machine) was built and verified working,
+then started rendering INTERMITTENTLY (sometimes correct, sometimes
+entirely blank) purely because a second, unrelated new section was added
+elsewhere in the same program — confirmed via deterministic VRAM reads
+(not a live counter) at fixed cycle counts, so a real bug, not a
+measurement artifact. Two false trails to watch for: (1) a screenshot
+showing a PARTIAL render isn't necessarily a bug — an async/arbitrary-cycle
+capture can legitimately catch a multi-line draw still mid-render; only a
+blank or a stable wrong result across multiple independent settled samples
+is real evidence. (2) A live, continuously-incrementing per-tick debug
+counter sampled at an arbitrary cycle count can look exactly like the
+symptom above purely because it's caught mid-computation — unlike a probe
+gated on a one-time init call (which stays valid at any later sample), a
+live per-tick value needs a genuinely settled capture (log it right after
+the section's own tick-function call returns in the main loop) before
+trusting it. **Real fix, once genuinely confirmed** via the settled-capture
+technique: (1) replace the library's `hb_line()` with a local, `__noinline`
+hand-written Bresenham calling `hb_set()`/`hb_clr()` directly, AND
+(2) bracket the whole erase/recompute/draw sequence with
+`hrirq_stop()`/`hrirq_start()` — the intermittent nature pointed at an
+interrupt-timing collision (both fixes applied and verified together, not
+proven individually necessary). **Practical takeaway**: this bug class's
+"adding code elsewhere can flip a save-set" signature isn't limited to
+build-time register-pressure changes — it can also show up as runtime,
+timing-dependent intermittent failures once a large enough whole-program
+change lands. Never treat a section as "done" just because it passed
+verification once, in isolation — re-verify with the settled-sample
+technique after each subsequent unrelated addition. Full write-up:
+`~/.claude/oscar64.md`'s same entry family.
+
 ---
 
 ## Oric Atmos Project Library API (`include/charwin.h/c`)

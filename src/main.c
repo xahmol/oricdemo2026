@@ -22,6 +22,7 @@
 #include "section_hires_showcase.h"
 #include "section_polygon_workout.h"
 #include "section_func3d.h"
+#include "section_sprite_showcase.h"
 #include "section_common.h"
 #include "rom_charset.h"
 #include "idi8b_altcharset.h"
@@ -337,6 +338,12 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define FUNC3D_MIN_TICKS  20u
 #define FUNC3D_MAX_TICKS 300u
 
+// Sprite showcase: a satellite drifts indefinitely across the starfield
+// (its own tick() never calls section_mark_finished()), so min_ticks/
+// max_ticks pace it, same ~22s hold as the other showcase sections.
+#define SPRITE_SHOWCASE_MIN_TICKS  20u
+#define SPRITE_SHOWCASE_MAX_TICKS 300u
+
 // The demo's own running order -- currently the idi8b splash, the Oric
 // logo/raster-bar intro, the bird scene, and the HIRES shapes showcase;
 // later phases insert the remaining showcase sections/credits after (see
@@ -348,6 +355,7 @@ static const DemoSection sections[] = {
     { section_hires_showcase_init, section_hires_showcase_tick, HIRES_SHOWCASE_MIN_TICKS, HIRES_SHOWCASE_MAX_TICKS },
     { section_polygon_workout_init, section_polygon_workout_tick, POLYGON_WORKOUT_MIN_TICKS, POLYGON_WORKOUT_MAX_TICKS },
     { section_func3d_init, section_func3d_tick, FUNC3D_MIN_TICKS, FUNC3D_MAX_TICKS },
+    { section_sprite_showcase_init, section_sprite_showcase_tick, SPRITE_SHOWCASE_MIN_TICKS, SPRITE_SHOWCASE_MAX_TICKS },
 };
 #define NUM_SECTIONS (sizeof(sections) / sizeof(sections[0]))
 

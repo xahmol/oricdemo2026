@@ -52,3 +52,8 @@ AddDefine LOADER_LOGO_FILE {FileIndex}
 ; src/section_hires_showcase.c's own MUSIC_FILE2.
 AddFile {MUSIC2_BIN}
 AddDefine LOADER_MUSIC2_FILE {FileIndex}
+
+; File index 4: assets/starfield.bin, loaded via picture_load(4)
+; (STORAGE_FLOPPY) -- see src/section_sprite_showcase.c's STARFIELD_FILE.
+AddFile {STARFIELD_BIN}
+AddDefine LOADER_STARFIELD_FILE {FileIndex}

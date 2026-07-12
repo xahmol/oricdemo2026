@@ -25,16 +25,42 @@
 // 1 MHz clock makes that scale impractical for a demo section that should
 // build in a few seconds, not tie up the whole section's hold time.
 //
-// hb_line() is reused here (already proven safe, both at an isolated
-// smoke-test call site AND at section_polygon_workout.c's own
-// repeated-per-tick, computed-coordinate call shape -- see that file's
-// header comment for the full verification story, including a real
-// methodology pitfall found and corrected along the way).
+// A REAL, confirmed regression was found and fixed while adding this
+// section's own place in the section table (Round 6, after
+// section_polygon_workout.c already existed and had been verified
+// working): once `section_sprite_showcase` was ALSO added elsewhere in
+// the program, this section's own mesh started rendering intermittently
+// -- sometimes a full, correct mesh, sometimes nothing at all -- despite
+// draw_mesh_line()'s own loop counters (line_index, and a temporary
+// settled-sample probe logging into a ring buffer right after tick()
+// returns, not an arbitrary async cycle count -- see
+// section_polygon_workout.c's own header comment for why that distinction
+// matters) always reaching their correct final values. Deterministic
+// VRAM reads at multiple fixed cycle counts confirmed this wasn't a
+// sampling artifact: the mesh was GENUINELY absent from the framebuffer
+// at some points and genuinely present at others, for the exact same
+// code, only differing in what ELSE existed elsewhere in the whole
+// program -- another instance of this project's own well-documented
+// Oscar64 -O2 whole-program register-allocator bug class (see
+// ~/.claude/oscar64.md), this time apparently timing/interrupt-sensitive
+// (Arkos's `arkos_tick()`/`main_frame_tick_isr()` fire continuously via
+// `hrirq.h` throughout). Fixed by BOTH: (1) replacing hires.c's own
+// hb_line() with a local, `__noinline` hand-written Bresenham
+// (`draw_line_local()` below, calling hb_set()/hb_clr() directly -- the
+// same proven-safe primitives hb_rect_fill()/hb_ellipse_fill() already
+// use successfully elsewhere), and (2) bracketing every mesh
+// erase/recompute/draw pass with hrirq_stop()/hrirq_start(), matching the
+// interrupt-collision mitigation this project has used before. Verified
+// via the same settled-sample ring-buffer technique: a stable, correct
+// count on every sampled tick after both fixes, across a long soak test
+// on both targets -- see this project's own plan file (Round 6) for the
+// full investigation log.
 
 #include <math.h>
 #include "oric.h"
 #include "hires.h"
 #include "vector3d.h"
+#include "rasterirq.h"
 #include "section_func3d.h"
 
 #define GRID_SIZE   9u
@@ -109,6 +135,37 @@ __noinline static void project_row(uint8_t iy)
     }
 }
 
+__noinline static void draw_line_local(const HiresBitmap *hb, uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, bool set)
+{
+    int16_t dx = (int16_t)x1 - (int16_t)x0;
+    int16_t dy = (int16_t)y1 - (int16_t)y0;
+    int16_t sx = (dx < 0) ? -1 : 1;
+    int16_t sy = (dy < 0) ? -1 : 1;
+    int16_t err;
+    int16_t x = x0, y = y0;
+
+    if (dx < 0) dx = (int16_t)(-dx);
+    if (dy < 0) dy = (int16_t)(-dy);
+    err = (int16_t)(dx - dy);
+
+    for (;;)
+    {
+        if (set)
+            hb_set(hb, (uint8_t)x, (uint8_t)y);
+        else
+            hb_clr(hb, (uint8_t)x, (uint8_t)y);
+
+        if (x == x1 && y == y1)
+            break;
+
+        {
+            int16_t e2 = (int16_t)(2 * err);
+            if (e2 > -dy) { err = (int16_t)(err - dy); x = (int16_t)(x + sx); }
+            if (e2 <  dx) { err = (int16_t)(err + dx); y = (int16_t)(y + sy); }
+        }
+    }
+}
+
 // Mesh line #n out of TOTAL_LINES: lines 0..(GRID_SIZE*GRID_LAST-1) are
 // horizontal (row-wise) segments, the rest are vertical (column-wise).
 // GRID_LAST=8 is a power of 2, so the / and % below are cheap shifts/masks,
@@ -120,14 +177,14 @@ __noinline static void draw_mesh_line(const HiresBitmap *screen, uint16_t n, boo
     {
         uint8_t iy = (uint8_t)(n / GRID_LAST);
         uint8_t ix = (uint8_t)(n % GRID_LAST);
-        hb_line(screen, (const HiresClip *)0, proj[iy][ix].x, proj[iy][ix].y, proj[iy][ix + 1].x, proj[iy][ix + 1].y, set);
+        draw_line_local(screen, proj[iy][ix].x, proj[iy][ix].y, proj[iy][ix + 1].x, proj[iy][ix + 1].y, set);
     }
     else
     {
         uint16_t m = (uint16_t)(n - horiz_count);
         uint8_t ix = (uint8_t)(m / GRID_LAST);
         uint8_t iy = (uint8_t)(m % GRID_LAST);
-        hb_line(screen, (const HiresClip *)0, proj[iy][ix].x, proj[iy][ix].y, proj[iy + 1][ix].x, proj[iy + 1][ix].y, set);
+        draw_line_local(screen, proj[iy][ix].x, proj[iy][ix].y, proj[iy + 1][ix].x, proj[iy + 1][ix].y, set);
     }
 }
 
@@ -190,8 +247,10 @@ void section_func3d_tick(const HiresBitmap *screen)
     case F3D_DRAW:
     {
         uint8_t n;
+        hrirq_stop();
         for (n = 0; n < LINES_PER_TICK && line_index < TOTAL_LINES; n++, line_index++)
             draw_mesh_line(screen, line_index, true);
+        hrirq_start();
         if (line_index >= TOTAL_LINES)
         {
             state = F3D_ROTATE;
@@ -210,6 +269,8 @@ void section_func3d_tick(const HiresBitmap *screen)
 
             rotate_wait = 0;
 
+            hrirq_stop();
+
             for (n = 0; n < TOTAL_LINES; n++)
                 draw_mesh_line(screen, n, false);   // erase the OLD mesh
 
@@ -220,6 +281,8 @@ void section_func3d_tick(const HiresBitmap *screen)
 
             for (n = 0; n < TOTAL_LINES; n++)
                 draw_mesh_line(screen, n, true);    // draw the NEW mesh
+
+            hrirq_start();
         }
         break;
     }
