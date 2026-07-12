@@ -53,15 +53,43 @@ static uint8_t tick_count = 0;
 #define TREE_TRUNK_HALF   2u    // trunk is (2*TREE_TRUNK_HALF+1)px wide
 #define TREE_TRUNK_ROWS   7u
 
+// The canopy is drawn as stacked hb_rect_fill() bands (a stepped/pine
+// silhouette), NOT hb_triangle_fill/hb_polygon_fill -- a real, unresolved
+// Oscar64 -O2 whole-program register-allocator bug (matching
+// ~/.claude/oscar64.md's documented "caller-save set can be under-counted"
+// class) makes hb_polygon_fill's own nested fill loop silently skip most of
+// its iterations, but ONLY when called from this deep in the real demo's
+// call graph (main -> run_section -> ... -> draw_tree): confirmed via
+// RAM-dump instrumentation that only 149 of an expected 405 point tests ran
+// (0 ever "inside"), while an isolated call with the IDENTICAL triangle
+// coordinates rendered correctly. Several attempted fixes (__noinline on
+// hb_polygon_fill, extracting its bounds scan into its own small helper)
+// changed nothing, or just relocated the corruption elsewhere -- this is the
+// "trigger-sensitive, unpredictable" whole-program property the oscar64.md
+// entry warns about, not something reliably fixable by local code shape
+// changes. hb_rect_fill's much simpler loop (no mul32/divs32, no
+// point-in-polygon math) is proven to render correctly in this exact build
+// (the trunk below uses it) -- bands sidestep the bug entirely, at the cost
+// of a blockier canopy than a smooth triangle.
+#define TREE_CANOPY_BANDS      5u
+#define TREE_CANOPY_BAND_ROWS  3u   // 5*3 = 15 rows, matching the old triangle's
+                                    // actual filled height (apex to base_y-TREE_TRUNK_ROWS+1)
+
 static void draw_tree(const HiresBitmap *hb, uint8_t x, uint8_t base_y)
 {
+    uint8_t apex_y = (uint8_t)(base_y - TREE_HEIGHT);
+    uint8_t band;
+
     hb_rect_fill(hb, (const HiresClip *)0, (uint8_t)(x - TREE_TRUNK_HALF), (uint8_t)(base_y - TREE_TRUNK_ROWS + 1),
                  2 * TREE_TRUNK_HALF + 1, TREE_TRUNK_ROWS, true);
-    hb_triangle_fill(hb, (const HiresClip *)0,
-                      x, (uint8_t)(base_y - TREE_HEIGHT),
-                      (uint8_t)(x - TREE_HALF_SPAN), (uint8_t)(base_y - TREE_TRUNK_ROWS + 1),
-                      (uint8_t)(x + TREE_HALF_SPAN), (uint8_t)(base_y - TREE_TRUNK_ROWS + 1),
-                      true);
+
+    for (band = 0; band < TREE_CANOPY_BANDS; band++)
+    {
+        uint8_t half_width = (uint8_t)((TREE_HALF_SPAN * (band + 1)) / TREE_CANOPY_BANDS);
+        hb_rect_fill(hb, (const HiresClip *)0,
+                     (uint8_t)(x - half_width), (uint8_t)(apex_y + band * TREE_CANOPY_BAND_ROWS),
+                     (uint8_t)(2 * half_width + 1), TREE_CANOPY_BAND_ROWS, true);
+    }
 }
 
 // Colours a tree black (silhouette-style, matching section_bird.c's own

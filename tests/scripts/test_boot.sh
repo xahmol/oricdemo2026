@@ -71,25 +71,32 @@ else
     # and 11-13 (hardware envelope) stay 0 -- this fixture's byte pattern
     # (NoSoftNoHard/NoSoftNoHard-or-loop paths only) never touches them.
     # Register 6 (noise period) also stays 0 -- no noise bit ever set.
-    # Register 7 (mixer) is 0x3F: all 3 channels' NoSoftNoHard/-or-loop
+    # Register 7 (mixer) is 0x7F: all 3 channels' NoSoftNoHard/-or-loop
     # decode calls arkos_rb_close_tone() once each (never open_noise()),
     # shifted/accumulated into 0xE0 -> 0x3F across the 3-channel loop --
     # i.e. ALL 6 tone+noise bits end up disabled, since nothing in this
-    # fixture ever opens a noise channel. The shift only happens BETWEEN
-    # channels (after channel 1 and after channel 2, never after channel
-    # 3 -- akyplayer.s's own PLY_AKY_PLAY does exactly 2 shifts for 3
-    # channels, not one per channel); a real, confirmed bug had an extra
-    # 3rd shift here, scrambling which physical bit encoded which
-    # channel's tone/noise state entirely (see docs/arkos.md's
-    # Verification section -- this was the "third channel line never
-    # appears" bug, found via the real shipped song, not this fixture).
+    # fixture ever opens a noise channel -- then OR'd with 0x40 before the
+    # actual hardware write (see include/arkos.c's own comment on that
+    # line): AY register 7 bit 6 is Port A's I/O direction, and forcing it
+    # to 1 (input) keeps include/keyboard.c's keyb_scan() able to sense
+    # keypresses for the program's entire run, instead of Arkos silently
+    # clobbering it to output mode (0) on every tick, which was a real bug
+    # -- found while investigating why keyboard-based section-skipping
+    # never worked. The shift only happens BETWEEN channels (after channel
+    # 1 and after channel 2, never after channel 3 -- akyplayer.s's own
+    # PLY_AKY_PLAY does exactly 2 shifts for 3 channels, not one per
+    # channel); a real, confirmed bug had an extra 3rd shift here,
+    # scrambling which physical bit encoded which channel's tone/noise
+    # state entirely (see docs/arkos.md's Verification section -- this was
+    # the "third channel line never appears" bug, found via the real
+    # shipped song, not this fixture).
     # Registers 8/9/10 (volume A/B/C) are all 0x01 -- all 3 channels
     # decode the SAME shared RegisterBlock byte (0x08, a real track/
     # registerblock-reuse scenario, not a fixture shortcut -- see
     # docs/arkos.md), so all 3 channels compute the identical volume
     # value.
     check_found "Arkos tune loaded"     "Arkos tune loaded, AY regs:"  "$BOOT_DUMP"
-    check_found "Arkos AY registers"    "00 00 00 00 00 00 00 3F 01 01 01 00 00" "$BOOT_DUMP"
+    check_found "Arkos AY registers"    "00 00 00 00 00 00 00 7F 01 01 01 00 00" "$BOOT_DUMP"
     # Arkos tick 4: 3 more NON-INITIAL frames (bytes 0x00, 0x04, 0x0C, see
     # src/buildtest.c's own comment) continuing from wherever the previous
     # frame's cursor left off within the SAME Track triple (duration 4) --
@@ -102,7 +109,7 @@ else
     # 0, tick 4 writes 1 -- same for all 3 channels since they're still
     # decoding the same shared RegisterBlock).
     check_found "Arkos tick 4"          "Arkos tick 4, AY regs:"       "$BOOT_DUMP"
-    check_found "Arkos tick 4 AY registers" "00 00 00 00 00 00 00 3F 01 01 01 00 00" "$BOOT_DUMP"
+    check_found "Arkos tick 4 AY registers" "00 00 00 00 00 00 00 7F 01 01 01 00 00" "$BOOT_DUMP"
 fi
 
 echo ""

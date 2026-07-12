@@ -1264,60 +1264,6 @@ __interrupt void modplay_tick(void) { /* logic */ }
 The `__asm` entry has zero C overhead. The `jsr/__interrupt/rts` trio is balanced
 so the hardware stack is clean when JMP executes.
 
-### `__interrupt` also disallows recursion, and has a "too complex" limit
-Confirmed on Oscar64 (Oric Atmos target, oricdemo2026's Arkos Tracker player):
-1. **No recursive functions** — error 3035 "No recursive functions in interrupt".
-   A reference algorithm's own "restart decode from a new pointer" mechanism
-   (calling back into the same top-level dispatch function) is a real recursive
-   cycle even if it always terminates. Fix: restructure the recursive call into
-   an explicit `for(;;)` loop with `continue` instead of a self-call.
-2. **"Function to complex for interrupt" (error 3035, sic)** — hit when the
-   `__interrupt`-qualified function's own reachable call graph got too large
-   (in this case: ~14 small dispatch functions called from one entry point).
-   Fix: collapse the call graph into fewer, larger functions with inline
-   if/else branching instead of many small ones — this is a case where *more*
-   modularity made the compiler's interrupt-safety analysis fail, not less.
-   The complexity threshold is sensitive to `-O` level in a non-obvious way:
-   the same code that failed at `-O1` compiled fine at `-O2` (higher
-   optimization apparently shrinks whatever metric this check uses — do not
-   assume `-O1` is the "safer" fallback if `-O2` hits this error).
-
-### Same `-O2` allocator bug (see below), confirmed again with different symptoms
-The Oric Atmos/Arkos case above hit the **same underlying bug** as "`-O2`
-whole-program register allocator: caller-save set can be under-counted"
-further down this file — but manifested completely differently, which is
-itself worth knowing: that entry's symptom was position-shifting garbage
-written to SCREEN RAM by an unrelated caller; here, after collapsing many
-small dispatch functions into one large one (to satisfy the "too complex
-for interrupt" check above), TWO functions that were *not*
-`__interrupt`-qualified at all silently computed WRONG VALUES with no
-crash and no visible corruption elsewhere:
-- A `while (n > 0) { ...; n = ...; }` loop silently never executed its
-  body, even though `n` was independently confirmed correct (via a raw
-  memory peek at the read address) at loop entry.
-- `some_func16((uint16_t)(ptr + 1))` returned the correct value when called
-  in isolation (a tiny standalone wrapper, same inputs), but returned the
-  WRONG value when the identical expression was inlined directly into a
-  large function with many other locals simultaneously live (a for-loop
-  counter, several `uint8_t`s, and a large multi-field struct).
-
-Same fix as the existing entry's spirit (reduce register pressure), applied
-differently since there was no interactive UI to eyeball here: **extract
-logic out of the large function into its own small `static` helper**,
-giving it an independent, much smaller stack frame — rather than the
-existing entry's "keep a dummy call to preserve register pressure"
-workaround (that trick doesn't apply when the bug is "wrong value", not
-"missing save/restore of a caller's own live register"). **Diagnostic
-technique that found this** (an alternative to that entry's `-g`/`.map`
-prologue inspection, useful when there's no interactive UI to watch for
-corruption): compare a value computed by a tiny isolated helper (same
-inputs) against the same computation's real call site, using an emulator's
-RAM-dump/screen-text capture to read out intermediate values
-non-interactively. Don't trust "it compiles and doesn't crash" as proof of
-correctness for a large, hot function on this target — verify actual
-computed values against an independent reference (e.g. a from-scratch
-interpreter/replica in another language) before trusting it.
-
 ### D64 disk image
 ```
 oscar64 main.c -d64=output.d64 -fz=resource.bin -f=uncompressed.bin
@@ -1737,10 +1683,7 @@ sprintf((char *)debug, "...", ...);
 ```
 Do not remove such a call without re-testing the full UI — its removal can
 silently re-break a caller's save-set. Full writeup with addresses/diffs:
-`~/.claude/oscar64.md`. Same bug confirmed again on the Oric Atmos target
-(oricdemo2026's Arkos player) with a different symptom (silently WRONG
-computed values, no visible corruption) — see "Same `-O2` allocator bug"
-above, in the Non-C64 Bare-Metal Targets section.
+`~/.claude/oscar64.md`.
 
 **`-O2` drops a `bool`-returning function's return-value store into `accu`**
 (discovered oricdemo2026, 2026-07-11)
@@ -1802,100 +1745,101 @@ calling convention instead.
 handler when a normal function's own complexity changes** (discovered
 oricdemo2026, 2026-07-11, follow-up investigation 2026-07-11)
 
-A THIRD distinct whole-program `-O2` bug — this project's own
-`src/section_logo.c` raster-bar effect. Adding ANY per-row colour-varying
+A THIRD distinct whole-program `-O2` bug. Adding ANY per-row colour-varying
 value to a normal (non-interrupt) function elsewhere in the program — an
 array lookup, a divmod-free rewrite of the same lookup, that lookup
 extracted to its own small helper, a plain `switch` instead of a lookup, or
 even a version with NO time-varying state at all (a compile-time-constant
 array indexed only by loop position) — reproducibly hung the WHOLE PROGRAM
-after anywhere from under a minute to tens of minutes of real playback: the
-Arkos Tracker music player's `__interrupt` 50Hz tick handler
-(`arkos_tick()`/`arkos_advance_pattern()`, `include/arkos.c`) ends up stuck
-forever, or the CPU jumps into unrelated DATA bytes and executes them.
-Confirmed only via a real, long (hundreds of millions of cycles) headless
-Phosphoric soak test — invisible in a short run or a single RAM-dump.
+after anywhere from under a minute to tens of minutes of real playback: an
+unrelated Arkos Tracker music player's `__interrupt` 50Hz tick handler ends
+up stuck forever, or the CPU jumps into unrelated DATA bytes and executes
+them. Confirmed only via a real, long (hundreds of millions of cycles)
+headless soak test — invisible in a short run or a single RAM-dump.
 
 A follow-up session disproved the obvious theory ("same as the caller-save
-under-count bug above"): a `-g` disassembly diff of `arkos_tick()`'s own
-compiled prologue between a safe build and a hang-reproducing build was
-BYTE-IDENTICAL (only unrelated data addresses differed) — this is NOT a
-static save-set gap. It also requires an ACTUAL interrupt firing live
-(proven safe for 400M+ cycles with Arkos never loaded/registered) and
-specifically needs `arkos_tick()`'s own callees to process genuinely
-time-varying real song data, not merely "this code path runs" (forcing/
-suppressing `arkos_advance_pattern()` in a degenerate, repetitive way was
-safe either way) — a genuine runtime race, not a build-time code-shape
-defect. An IRQ-level trace (`--trace-irq`) confirmed clean, regular
-ENTRY/RTI pairs right up to the one that never returns, and — surprisingly
-— that fatal interrupt's own landing point, and every other interrupt
-across the traced run, never fell inside the offending raster-bar
-function's own code at all; the eventual frozen PC sat inside a
-legitimate, UNCORRUPTED BSS lookup table (`hires_col_byte`), meaning some
-JUMP/RETURN target elsewhere had been corrupted to point there (consistent
-with a stray write hitting the hardware stack, not a missing save). The
-exact instruction responsible was not pinned down — that needs live
+under-count bug above"): a `-g` disassembly diff of the `__interrupt`
+handler's own compiled prologue between a safe build and a hang-reproducing
+build was BYTE-IDENTICAL (only unrelated data addresses differed) — this is
+NOT a static save-set gap. It also requires an ACTUAL interrupt firing live
+(proven safe for 400M+ cycles with the interrupt never registered) and
+specifically needs the interrupt handler's own callee to process genuinely
+time-varying real data, not merely "this code path runs" (forcing/
+suppressing that callee in a degenerate, repetitive way was safe either
+way) — a genuine runtime race, not a build-time code-shape defect. An
+IRQ-level trace confirmed clean, regular ENTRY/RTI pairs right up to the
+one that never returns, and — surprisingly — that fatal interrupt's own
+landing point, and every other interrupt across the traced run, never fell
+inside the offending function's own code at all; the eventual frozen PC sat
+inside a legitimate, UNCORRUPTED BSS lookup table, meaning some JUMP/RETURN
+target elsewhere had been corrupted to point there (consistent with a stray
+write hitting the hardware stack, not a missing save). The exact
+instruction responsible was not pinned down — that needs live
 instruction-level tracing across millions of instructions to catch an
 event that's evidently rare even when it does occur. Full writeup with
 every experiment (both the original session's and the follow-up's) and
-every disproved theory: `~/.claude/oscar64.md`. Safest known response,
-currently applied in `src/section_logo.c`: revert to no time-varying
-per-row value at all (every row painted in one call gets the identical
-colour) — every alternate implementation tried (across two full sessions)
-reproduced the same bug.
+every disproved theory: `~/.claude/oscar64.md`. Safest known response:
+revert to no time-varying per-row value at all — every alternate
+implementation tried (across two full sessions) reproduced the same bug.
 
 **RESOLVED** (third session, 2026-07-12): NOT a caller-save-set bug, NOT
-an Arkos bug, NOT a bird-sprite bug (all directly checked and ruled out
-this session — in particular, the corrupting write occurs while
-`section_logo` is the active section, well before `section_bird` ever
-runs) — a genuine Oscar64 **inliner** bug. `include/hires.c`'s
-`hires_row_off[y]` (a `uint16_t` table indexed by an 8-bit row) requires
-doubling `y` into a 16-bit value via `ASL`+`ROL` on a zero-page pair. A
-hand-written loop calling `hires_row_colors()` repeatedly (this project's
-`set_rows()` in `src/section_logo.c`) compiles CORRECTLY as a standalone
-`JSR`'d function — disassembly shows an explicit `LDA #$00` resetting the
-address's high byte every iteration before the next `ASL`/`ROL`. But when
-Oscar64 INLINES that same loop directly into a caller — confirmed for
-`section_logo_tick()`'s own literal-constant-argument call, `set_rows
-(bar_y, BAR_HEIGHT, A_FWWHITE, A_BGBLACK)` — the inlined copy DROPS that
-reset, so every iteration after the first doubles the row index against
-a STALE high byte left over from the SAME zero-page cell's prior use
-(that slot doubles as the loop's just-computed HIRESVRAM destination
-high byte too) — deriving a wrong table-lookup address that reads an
-arbitrary on-screen pixel/attribute byte as if it were a row offset.
-This lands back in valid VRAM by chance almost always (`+ $A0` mod 256 on
-an arbitrary byte usually stays in range) — explaining the 1.5B+ prior
-clean soak cycles: this bug has plausibly always been latent in any loop
-calling `hires_row_colors()`/`hires_put_ink`/`hires_put_paper`, not
-introduced by the colour-cycling change. It only turns fatal when the
-misread on-screen byte is large enough to wrap past `$FF` — confirmed via
-a cycle-exact Phosphoric `--trace` capture wrapping into
-`arkos_advance_pattern()`'s own compiled code and overwriting 2
-instruction bytes with the exact ink/paper values being painted
-($07/$10 = `A_FWWHITE`/`A_BGBLACK`), which is exactly why the symptom
-looked Arkos-shaped in both earlier sessions — the real bug is entirely
-in `include/hires.c`'s compiled address arithmetic and has nothing to do
-with Arkos, interrupts, or the bird scene.
+an Arkos bug, NOT a bird-sprite bug (all directly checked and ruled out) —
+a genuine Oscar64 **inliner** bug. A hand-written loop indexing a
+`uint16_t` table by an 8-bit row value (`hires_row_off[y]`, this
+project's `include/hires.c`) compiles CORRECTLY as a standalone `JSR`'d
+function (each iteration resets the address's high byte to 0 before
+re-doubling the row index), but when Oscar64 INLINES that same loop shape
+directly into a caller — confirmed to happen for a call site with
+literal-constant arguments — the inlined copy DROPS that reset, so every
+iteration after the first doubles the row index against a STALE high
+byte left over from the previous iteration's own (different) use of that
+same zero-page cell, producing a wrong table-lookup address that misreads
+an arbitrary on-screen byte as a row offset. This lands back in valid
+VRAM by chance almost always (explaining 1.5B+ clean prior soak cycles on
+"safe" builds — this bug was always latent, not introduced by the colour
+change), but occasionally wraps past $FF into low memory when the
+misread byte is large enough — in the traced case, landing on
+`arkos_advance_pattern()`'s own compiled code and corrupting 2
+instruction bytes with the very ink/paper values being painted, which is
+why the symptom looked Arkos-shaped. **Fix**: `__noinline` on the
+`set_rows()`-shaped helper forces every call site through the one
+correctly-compiled body. Confirmed via disassembly (post-fix: plain `JSR`,
+high-byte reset present) and a full soak-test re-run (100M-1.5B cycles,
+both build targets, healthy progressing PC at every sample, `make
+test`/`make test-disk` green) — the multi-colour raster bar now works.
+Full mechanism/evidence trail: `~/.claude/oscar64.md`'s same entry.
+**Practical takeaway**: if a hang's own symptom points at one subsystem
+(here, Arkos) but every targeted check of that subsystem comes up clean,
+diff the WHOLE PROGRAM's compiled function sizes (not just the suspected
+function) between a safe and broken build — the one that actually changed
+size here was nowhere near the suspected subsystem, and that's what
+redirected the investigation to the real cause.
 
-**Fix, applied in `src/section_logo.c`**: `__noinline` on `set_rows()`
-forces every call site — including the literal-constant-argument one
-that triggered the inlining — through the one correctly-compiled
-function body. Confirmed via disassembly (post-fix: plain `JSR`,
-`LDA #$00` reset present) and a full soak-test re-run with a real
-per-row colour-varying `paint_bar()` re-enabled: `make`/`make disk`
-clean, `make test`/`make test-disk` both green, and healthy, PROGRESSING
-(never-repeating) PC/registers at 100M/300M/500M/700M/1000M/1500M cycles
-on BOTH build targets, no "CPU halted" at any sample — the multi-colour
-raster bar is genuinely fixed this time, not reverted-and-avoided.
-
-**Practical takeaway for future hangs with a similarly Arkos/interrupt-
-shaped symptom**: if every targeted check of the suspected subsystem
-comes up clean (as items 1-7 of the follow-up session above conclusively
-did for Arkos), diff the WHOLE PROGRAM's compiled function SIZES (not
-just the suspected function) between a safe and a broken build — here,
-every function in `arkos.c`/`hires.c`'s hot paths was byte-identical
-except `section_logo_tick`/`set_rows`/`paint_bar` themselves, which is
-the one fact that redirected the investigation to the real culprit.
+**Fourth session, third symptom shape (2026-07-12): documented fixes can
+FAIL for this bug class, not just vary in effectiveness.**
+`hb_polygon_fill()`'s own nested `for(py) for(px)` fill loop silently ran
+only 149 of an expected 405 iterations (a 27x15 bounding box), zero of them
+ever testing "inside" — confirmed by a temporary counter inside the loop,
+gated on a known coordinate to isolate one call site, read back via
+emulator RAM-dump. An ISOLATED call to the same function with the
+IDENTICAL coordinates (in a small separate test fixture) ran all 405
+iterations correctly — the function has no logic bug; only reachable from
+deep in the real program's call graph did it misbehave, the same
+"emergent, whole-program property" signature as the original entry above.
+**Neither established fix worked**: `__noinline` on the function changed
+nothing (it was already a real standalone `JSR`'d function, nothing to
+prevent inlining); extracting its bounds-scan loop into its own
+`__noinline static` helper (this section's own documented mitigation)
+demonstrably changed the compiled code (binary size and disassembly both
+differed) yet the loop still ran the exact same wrong iteration count.
+**Practical takeaway**: this bug class can resist its own documented
+workarounds at a given call site for reasons not yet understood. After one
+honest attempt at each known fix, stop trying to out-guess the allocator —
+route around the buggy call site instead (here: replaced a
+`hb_triangle_fill`/`hb_polygon_fill` call with several simpler
+`hb_rect_fill` calls, proven to work at that exact call site, accepting a
+blockier visual result). Full write-up: `~/.claude/oscar64.md`'s same
+entry family.
 
 ---
 

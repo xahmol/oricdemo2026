@@ -705,7 +705,16 @@ __interrupt void arkos_tick(void)
             r7 = (uint8_t)(r7 >> 1);
     }
 
-    arkos_ay_write_if_changed(AY_REG_MIXER, (uint8_t)(r7 & 0x3F));
+    // "| 0x40" keeps AY register 7 bit 6 (Port A / IOA direction) forced to
+    // input mode on every write -- without it, r7's own bits 6-7 (used as
+    // scratch shift space while building the per-channel tone/noise bits
+    // above, then masked away here) land on the hardware as 0, which real
+    // Oric hardware (and this project's own emulator model) interprets as
+    // "Port A output mode", silently breaking include/keyboard.c's
+    // keyb_scan() for the rest of the program's run the moment Arkos starts
+    // ticking (~20ms after boot) -- LOCI's own boot-time R7=$7F seed exists
+    // for exactly this reason, and this write was undoing it every tick.
+    arkos_ay_write_if_changed(AY_REG_MIXER, (uint8_t)((r7 & 0x3F) | 0x40));
     arkos_ay_write_if_changed(AY_REG_NOISE, (uint8_t)(arkos_psg6 & 0x1F));
     arkos_ay_write_if_changed(AY_REG_ENV_LO, arkos_psg11);
     arkos_ay_write_if_changed(AY_REG_ENV_HI, arkos_psg12);

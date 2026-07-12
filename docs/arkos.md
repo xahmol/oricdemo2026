@@ -492,3 +492,37 @@ bit-position scramble unless you specifically check that a channel's own
 bits over an extended, realistic window -- exactly what following one
 song's structure for its FULL loop, not just a handful of ticks, made
 visible.
+
+### Third real bug found and fixed: the mixer write silently disabled keyboard scanning
+
+Found while investigating a user report that pressing a key never skips to
+the next demo section. `arkos_tick()`'s own mixer write masked `r7` with
+`& 0x3F` before sending it to the hardware -- correct for the tone/noise
+enable bits (0-5), but this unconditionally zeroes bits 6-7 too. AY-3-8912
+register 7 bit 6 controls Port A's I/O direction: bit 6 = 1 is required
+for `include/keyboard.c`'s `keyb_scan()` to sense keypresses at all (this
+project's own LOCI boot path pre-seeds register 7 to `$7F` for exactly
+this reason -- see `include/loci.c`). Since `arkos_tick()` runs every
+single tick from ~20ms after boot for the rest of the program's life, this
+silently forced Port A into output mode and permanently broke keyboard
+scanning almost immediately after startup, for effectively the entire
+real runtime of every session (music is always playing). **Fix**: write
+`(uint8_t)((r7 & 0x3F) | 0x40)` instead of `(uint8_t)(r7 & 0x3F)` --
+keeps the correctly-computed mixer bits while unconditionally forcing bit
+6 back to input mode on every write, so keyboard scanning keeps working
+throughout playback. `tests/scripts/test_boot.sh`/`test_disk.sh`'s
+hardcoded "Arkos AY registers" expected-dump strings needed updating
+(register 7: `3F` -> `7F`) since they were asserting the old, broken
+value.
+
+**Diagnostic note**: confirmed via a temporary debug probe that the fixed
+value (with bit 6 set) really does reach the AY shadow register (and thus
+the real hardware write) -- the mixer-register mechanism itself is
+confirmed correct. Headless Phosphoric `--type-keys` testing still could
+not independently confirm the keypress-detection symptom is fully
+resolved (a separate, unresolved mystery in the test harness itself, with
+several plausible explanations investigated and ruled out -- see the
+plan file's own Round 5 write-up for the full list) -- this is a real,
+hardware-accurate fix regardless, and should be verified with a real
+interactive session (`make run-phos`/`make run-disk`) rather than trusted
+on headless testing alone.
