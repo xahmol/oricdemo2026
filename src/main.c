@@ -20,6 +20,8 @@
 #include "section_splash.h"
 #include "section_logo.h"
 #include "section_hires_showcase.h"
+#include "section_polygon_workout.h"
+#include "section_func3d.h"
 #include "section_common.h"
 #include "rom_charset.h"
 #include "idi8b_altcharset.h"
@@ -321,6 +323,20 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define HIRES_SHOWCASE_MIN_TICKS  20u
 #define HIRES_SHOWCASE_MAX_TICKS 150u
 
+// Polygon workout: circles indefinitely (its own tick() never calls
+// section_mark_finished(), see section_polygon_workout.c), so
+// min_ticks/max_ticks are the only thing pacing it -- same ~22s hold as
+// section_logo.c's own raster bars.
+#define POLYGON_WORKOUT_MIN_TICKS  20u
+#define POLYGON_WORKOUT_MAX_TICKS 300u
+
+// 3D function surface: builds up over ~(9+9+18)=36 ticks (prepare/project/
+// draw phases), then rotates for the remainder -- no natural end, so
+// min_ticks/max_ticks pace the whole section, same ~22s hold as the other
+// two HIRES-shape sections above.
+#define FUNC3D_MIN_TICKS  20u
+#define FUNC3D_MAX_TICKS 300u
+
 // The demo's own running order -- currently the idi8b splash, the Oric
 // logo/raster-bar intro, the bird scene, and the HIRES shapes showcase;
 // later phases insert the remaining showcase sections/credits after (see
@@ -330,6 +346,8 @@ static const DemoSection sections[] = {
     { section_logo_init, section_logo_tick, LOGO_MIN_TICKS, LOGO_MAX_TICKS },
     { bird_scene_init, bird_scene_tick, BIRD_MIN_TICKS, BIRD_MAX_TICKS },
     { section_hires_showcase_init, section_hires_showcase_tick, HIRES_SHOWCASE_MIN_TICKS, HIRES_SHOWCASE_MAX_TICKS },
+    { section_polygon_workout_init, section_polygon_workout_tick, POLYGON_WORKOUT_MIN_TICKS, POLYGON_WORKOUT_MAX_TICKS },
+    { section_func3d_init, section_func3d_tick, FUNC3D_MIN_TICKS, FUNC3D_MAX_TICKS },
 };
 #define NUM_SECTIONS (sizeof(sections) / sizeof(sections[0]))
 

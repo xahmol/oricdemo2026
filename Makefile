@@ -99,6 +99,10 @@ MAIN_SRCS = \
   src/section_logo.h    \
   src/section_hires_showcase.c \
   src/section_hires_showcase.h \
+  src/section_polygon_workout.c \
+  src/section_polygon_workout.h \
+  src/section_func3d.c  \
+  src/section_func3d.h  \
   src/section_common.h  \
   src/section_background.c \
   src/section_background.h \
@@ -127,6 +131,8 @@ MAIN_SRCS = \
   include/sprite.h      \
   include/fixedmath.c   \
   include/fixedmath.h   \
+  include/vector3d.c    \
+  include/vector3d.h    \
   include/arkos.c       \
   include/arkos.h       \
   include/ay.c          \
@@ -294,6 +300,10 @@ FLOPPY_SRCS = \
   src/section_logo.h       \
   src/section_hires_showcase.c \
   src/section_hires_showcase.h \
+  src/section_polygon_workout.c \
+  src/section_polygon_workout.h \
+  src/section_func3d.c     \
+  src/section_func3d.h     \
   src/section_common.h  \
   src/section_background.c \
   src/section_background.h \
@@ -322,6 +332,8 @@ FLOPPY_SRCS = \
   include/sprite.h         \
   include/fixedmath.c      \
   include/fixedmath.h      \
+  include/vector3d.c       \
+  include/vector3d.h       \
   include/floppy.c         \
   include/floppy.h         \
   include/rasterirq.c      \
