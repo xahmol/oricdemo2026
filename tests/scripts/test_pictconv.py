@@ -25,7 +25,9 @@ Fixtures:
                           pre-stage the next ink/paper pair (hand-verified
                           byte-by-byte when this fixture was captured).
   (hires_test_input.png is reused for the aic-mode case too, with a
-  white/black even-row pair and a cyan/red odd-row pair.)
+  white/black even-row pair and a cyan/red odd-row pair, and again for
+  samhocevar mode at depth=1 -- see that case's own comment for why
+  depth=1, not the mode's own depth=2 default.)
 """
 
 import subprocess
@@ -63,6 +65,23 @@ CASES = [
                  "--aic-ink0", "white", "--aic-paper0", "black",
                  "--aic-ink1", "cyan", "--aic-paper1", "red"],
         "expected": FIXTURES / "hires_test_expected_aic.bin",
+    },
+    {
+        # depth=1, not the mode's own default (2): depth=0 is a genuine
+        # degenerate case (no recursive lookahead means the "penalty for
+        # changing ink/paper state" mechanism never fires, so ties between
+        # a real pixel-print command and a no-op-visually-equivalent
+        # attribute-change command resolve arbitrarily -- confirmed to
+        # produce a fully-black, visually WRONG result on this exact b/w
+        # fixture during development). depth=1 is the cheapest depth that
+        # exercises real lookahead and renders this fixture correctly
+        # (byte-for-byte matches mono mode's own known-correct split) --
+        # depth=2 (the CLI default) also renders correctly but costs
+        # ~15x longer for no additional coverage value in a regression test.
+        "label": "samhocevar mode depth=1 (b/w split, matches mono's own split)",
+        "input": FIXTURES / "hires_test_input.png",
+        "args": ["--mode", "samhocevar", "--samhocevar-depth", "1"],
+        "expected": FIXTURES / "hires_test_expected_samhocevar_depth1.bin",
     },
 ]
 

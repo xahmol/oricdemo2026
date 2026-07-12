@@ -23,6 +23,10 @@ import sys
 
 from PIL import Image
 
+# samhocevar mode (below) is a much more direct port than mono/colored/aic --
+# see that section's own header comment for why, and for what was
+# deliberately adapted rather than copied bit-for-bit.
+
 # -------------------------------------------------------------------------
 # Oric HIRES geometry (mirrors include/oric.h)
 # -------------------------------------------------------------------------
@@ -416,6 +420,329 @@ def convert_aic(img, ink0, paper0, ink1, paper1, dither):
 
 
 # -------------------------------------------------------------------------
+# samhocevar mode: OSDK pictconv's "-f6" ("Sam method (Img2Oric)") --
+# per-block-of-6-pixels recursive lookahead search with a gamma-corrected
+# perceptual error metric and full Floyd-Steinberg-like error diffusion
+# (including into the row below, unlike mono/colored/aic's plain
+# palette-quantize dithering above). Upstream doc: "generally gives much
+# better results...albeit much much slower than other methods" -- true
+# here too, this is a genuinely different order of magnitude slower than
+# `colored` mode, expect real per-image runtimes in minutes.
+#
+# UNLIKE `colored`/`aic` above (which only borrow the general idea from
+# pictconv's C++), this IS a close, near-line-by-line port of pictconv's
+# own `oric_converter_samhocevar.cpp` (Sam Hocevar, "img2oric", 2008,
+# WTFPL) -- the algorithm's quality comes from its exact, empirically-tuned
+# constants (FS0-FS3 diffusion weights, the depth-based recursive
+# lookahead, the specific perceptual-error formula), so approximating it
+# "in the spirit of" the original (as `colored`/`aic` do) would lose
+# exactly the thing that makes it worth having. Two deliberate deviations
+# from the upstream source, both safety fixes rather than behaviour
+# changes:
+#
+#   1. Upstream's `maxerror` parameter is accepted by `bestmove()` but
+#      never actually read anywhere in its body (checked against the
+#      source) -- dropped here as genuinely dead.
+#   2. Upstream's flat pixel buffer only pads by exactly 1 extra column/
+#      row beyond the real image, then reads up to ~30px past a block's
+#      own right edge during the depth-2 recursive lookahead (and 1px
+#      before a row's own left edge, for the down-left diffusion target)
+#      -- both go out of the buffer's real bounds for edge blocks, which
+#      C's pointer arithmetic tolerates silently (reads/writes bleed into
+#      adjacent scanlines) but Python's bounds-checked lists do not. Uses
+#      a generous zero-filled margin on all four sides instead (sized to
+#      the actual worst-case lookahead distance for the configured
+#      `depth`), so those bleed-reads become harmless reads of padding
+#      instead of either crashing or (as upstream effectively does)
+#      wrapping into unrelated scanline data.
+# -------------------------------------------------------------------------
+
+_SAM_DEPTH_DEFAULT = 2  # upstream's own DEPTH; 3 is documented as better/slower still.
+_SAM_FS0, _SAM_FS1, _SAM_FS2, _SAM_FS3, _SAM_FSX = 15, 6, 9, 1, 32
+_SAM_PAD = 2048
+_SAM_CLAMP = 0x1000
+
+# palette[c] in 16-bit-per-channel linear-ish units (0 or 0xffff), matching
+# oric_converter_samhocevar.cpp's own `palette[8][6*3]` table (each entry
+# repeated 6x there to paste whole blocks; not needed here since we index
+# per-channel directly).
+_SAM_PALETTE = [(r * 257, g * 257, b * 257) for _name, (r, g, b) in PALETTE]
+
+# Command lookup table -- a DELIBERATE reduction from upstream
+# oric_converter_samhocevar.cpp's own 34-entry `lookup[]`. Upstream's
+# fg/bg-change commands come in "direct" (0x00-0x17) and "inverse video"
+# (0x80-0x97) pairs: the "inverse" half assumes writing an attribute byte
+# with bit7 set makes THAT byte's own (blank) screen cell display as the
+# complementary colour instead of plain paper. This project's own HIRES
+# convention (include/oric.h) only ever documents bit7 ("invert") as
+# meaningful for PIXEL bytes (bit6=1) -- attribute bytes (bit6=0) are
+# never written with bit7 set anywhere in include/hires.c, and `colored`
+# mode's own header comment already flags this exact "inverse attribute
+# byte" mechanism as unconfirmed by this project's hardware research, for
+# the same reason. Including it here made bestmove() degenerate into only
+# ever picking attribute-change commands it (incorrectly, per our model)
+# believed already displayed the right colour, never falling back to
+# real pixel-printing -- confirmed via a failing test (an all-white test
+# block converted to a row of alternating attribute bytes, zero actual
+# pixels set). Dropped the 16 "inverse attribute" candidates entirely,
+# keeping direct fg-change (0x00-0x07), direct bg-change (0x10-0x17), and
+# both pixel-printing commands (0x40 plain / 0xc0 inverted -- 0xc0's
+# bit7-on-pixel-data meaning IS confirmed, see hires_invert_byte()).
+_SAM_LOOKUP = (
+    0x00, 0x04, 0x01, 0x05, 0x02, 0x06, 0x03, 0x07,
+    0x10, 0x14, 0x11, 0x15, 0x12, 0x16, 0x13, 0x17,
+    0x40, 0xc0,
+)
+
+
+def _sam_build_gamma_tables():
+    size = _SAM_PAD * 2 + 256
+    itoc = [0] * size
+    ctoi = [0] * size
+    for i in range(size):
+        f = (i - _SAM_PAD) / 255.999
+        if f >= 0:
+            itoc[i] = int(65535.999 * (f ** (1 / 2.2)))
+            ctoi[i] = int(65535.999 * (f ** 2.2))
+        else:
+            itoc[i] = -int(65535.999 * ((-f) ** (1 / 2.2)))
+            ctoi[i] = -int(65535.999 * ((-f) ** 2.2))
+    return itoc, ctoi
+
+
+_SAM_ITOC_TABLE, _SAM_CTOI_TABLE = _sam_build_gamma_tables()
+_SAM_TABLE_SIZE = len(_SAM_ITOC_TABLE)
+
+
+def _sam_tdiv(a, b):
+    """C-style truncating (toward zero) integer division, b > 0."""
+    return a // b if a >= 0 else -((-a) // b)
+
+
+def _sam_err_sq(d):
+    """Mirrors `(a-b)/256 * (a-b)/256` -- left-to-right C operator
+    precedence makes this `((d/256)*d)/256`, NOT `(d/256)**2`."""
+    return _sam_tdiv(_sam_tdiv(d, 256) * d, 256)
+
+
+def _sam_table_index(p):
+    idx = _sam_tdiv(p, 256) + _SAM_PAD
+    if idx < 0:
+        return 0
+    if idx >= _SAM_TABLE_SIZE:
+        return _SAM_TABLE_SIZE - 1
+    return idx
+
+
+def _sam_itoc(p):
+    return _SAM_ITOC_TABLE[_sam_table_index(p)]
+
+
+def _sam_ctoi(p):
+    return _SAM_CTOI_TABLE[_sam_table_index(p)]
+
+
+def _sam_clamp(p):
+    if p < -_SAM_CLAMP:
+        return -_SAM_CLAMP
+    if p > 0xffff + _SAM_CLAMP:
+        return 0xffff + _SAM_CLAMP
+    return p
+
+
+def _sam_domove(command, bg, fg):
+    if (command & 0x78) == 0x00:
+        fg = command & 7
+    elif (command & 0x78) == 0x10:
+        bg = command & 7
+    return bg, fg
+
+
+def _sam_geterror(in_, inerr, out):
+    """Perceptual error of replacing 6 source pixels ("in_", 18 ints) with
+    6 chosen output pixels ("out", 18 ints), given "inerr" (3 ints) carried
+    into the first pixel. Returns (error, outerr) -- outerr is the 3-int
+    error carried past the last (6th) pixel, for the next block's own
+    lookahead call only (NOT real persistent diffusion -- see the real
+    diffusion pass in convert_samhocevar() below)."""
+    tmperr = [0] * 27
+    tmperr[0], tmperr[1], tmperr[2] = inerr[0], inerr[1], inerr[2]
+    ret = 0
+
+    for i in range(6):
+        base = i * 3
+        for c in range(3):
+            a = _sam_clamp(in_[base + c] + tmperr[c])
+            b = out[base + c]
+            d = a - b
+            tmperr[c] = _sam_tdiv(d * _SAM_FS0, _SAM_FSX)
+            tmperr[c + base + 3] += _sam_tdiv(d * _SAM_FS1, _SAM_FSX)
+            tmperr[c + base + 6] += _sam_tdiv(d * _SAM_FS2, _SAM_FSX)
+            tmperr[c + base + 9] += _sam_tdiv(d * _SAM_FS3, _SAM_FSX)
+            ret += _sam_err_sq(d)
+
+    for i in range(4):
+        base = i * 3
+        for c in range(3):
+            a = _sam_itoc(_sam_tdiv(in_[base + c] + in_[base + 3 + c] + in_[base + 6 + c], 3))
+            b = _sam_itoc(_sam_tdiv(out[base + c] + out[base + 3 + c] + out[base + 6 + c], 3))
+            ret += _sam_err_sq(a - b)
+
+    for i in range(3):
+        ret += _sam_err_sq(tmperr[i])
+
+    return ret, tmperr[0:3]
+
+
+def _sam_bestmove(in_, bg, fg, errvec, depth):
+    """Recursive lookahead search over the reduced candidate command set
+    (see _SAM_LOOKUP -- upstream had 34, this project's own hardware model
+    only confirms half of them, see that table's own comment). Returns
+    (command, error, out_rgb) -- out_rgb is the 18 chosen output pixel
+    values (6 pixels x 3 channels) for the CURRENT block only."""
+    voidrgb = _SAM_PALETTE[bg]
+    voide, voidvec = _sam_geterror(in_, errvec, voidrgb * 6)
+
+    if depth > 0:
+        _cmd, statice, _rgb = _sam_bestmove(in_[18:], bg, fg, (0, 0, 0), depth - 1)
+    else:
+        statice = 0
+
+    besterror = 0x7ffffff
+    bestcommand = 0x10
+    bestrgb = list(voidrgb) * 6
+
+    for command in _SAM_LOOKUP:
+        newbg, newfg = _sam_domove(command, bg, fg)
+
+        if (command & 0x40) == 0x00 and newbg == bg and newfg == fg:
+            continue
+
+        if (command & 0xf8) == 0x00:
+            curerror, rgb, vec = voide, voidrgb * 6, voidvec
+        elif (command & 0xf8) == 0x10:
+            rgb = _SAM_PALETTE[newbg] * 6
+            curerror, vec = _sam_geterror(in_, errvec, rgb)
+        else:
+            if (command & 0x80) == 0x00:
+                bgcolor, fgcolor = _SAM_PALETTE[bg], _SAM_PALETTE[fg]
+            else:
+                bgcolor, fgcolor = _SAM_PALETTE[7 - bg], _SAM_PALETTE[7 - fg]
+
+            tmpvec = list(errvec)
+            tmprgb = [0] * 18
+            for i in range(6):
+                base = i * 3
+                vec1 = [0, 0, 0]
+                vec2 = [0, 0, 0]
+                smalle1 = smalle2 = 0
+                for c in range(3):
+                    px = _sam_clamp(in_[base + c] + tmpvec[c])
+                    delta1 = px - bgcolor[c]
+                    vec1[c] = _sam_tdiv(delta1 * _SAM_FS0, _SAM_FSX)
+                    # NOTE: single division here (`delta1/256 * delta1`), NOT
+                    # the double-divided _sam_err_sq() pattern used in
+                    # _sam_geterror() -- verbatim from the upstream source's
+                    # own `smalle1 += delta1 / 256 * delta1;`.
+                    smalle1 += _sam_tdiv(delta1, 256) * delta1
+                    delta2 = px - fgcolor[c]
+                    vec2[c] = _sam_tdiv(delta2 * _SAM_FS0, _SAM_FSX)
+                    smalle2 += _sam_tdiv(delta2, 256) * delta2
+                if smalle1 < smalle2:
+                    tmpvec = vec1
+                    tmprgb[base:base + 3] = bgcolor
+                else:
+                    tmpvec = vec2
+                    tmprgb[base:base + 3] = fgcolor
+                    command |= (1 << (5 - i))
+
+            curerror = _sam_geterror(in_, errvec, tmprgb)[0]
+            rgb, vec = tmprgb, tmpvec
+
+        if curerror > besterror:
+            continue
+
+        curerror = _sam_tdiv(curerror * 3, 4)
+
+        if depth == 0:
+            suberror = 0
+        elif (command & 0x68) == 0x00:
+            _cmd, suberror, _rgb = _sam_bestmove(in_[18:], newbg, newfg, vec, depth - 1)
+            if newbg != bg:
+                suberror = _sam_tdiv(suberror * 10, 8)
+            elif newfg != fg:
+                suberror = _sam_tdiv(suberror * 9, 8)
+        else:
+            suberror = statice
+
+        if curerror + suberror < besterror:
+            besterror = curerror + suberror
+            bestcommand = command
+            bestrgb = list(rgb)
+
+    return bestcommand, besterror, bestrgb
+
+
+def convert_samhocevar(img, depth=_SAM_DEPTH_DEFAULT, progress=False):
+    width, height = HIRES_WIDTH_PX, HIRES_ROWS
+    px = img.load()
+
+    # See this section's own header comment (deviation #2): generous
+    # zero-filled margin on all sides, sized to the worst-case lookahead
+    # distance the recursion can read past a block's own 6 pixels.
+    pad_l = 1
+    pad_r = 6 * (depth + 2) + 1
+    row_px = width + pad_l + pad_r
+    stride = row_px * 3
+    rows_total = height + 1  # +1: safe write target below the last real row
+
+    src = [0] * (stride * rows_total)
+    lookahead_len = 3 * 6 * (depth + 3)
+
+    for y in range(height):
+        row_off = y * stride
+        for x in range(width):
+            r, g, b = px[x, y]
+            o = row_off + (x + pad_l) * 3
+            src[o + 0] = _sam_ctoi(r * 0x101)
+            src[o + 1] = _sam_ctoi(g * 0x101)
+            src[o + 2] = _sam_ctoi(b * 0x101)
+
+    out = bytearray(HIRES_SIZE)
+
+    for y in range(height):
+        if progress:
+            print(f"\rsamhocevar: row {y + 1}/{height}", end="", file=sys.stderr)
+        bg, fg = DEFAULT_PAPER, DEFAULT_INK
+        row_off = y * stride
+        for cx in range(width // 6):
+            x = cx * 6
+            base = row_off + (x + pad_l) * 3
+            in_ = src[base: base + lookahead_len]
+            command, _err, outrgb = _sam_bestmove(in_, bg, fg, (0, 0, 0), depth)
+
+            for c in range(3):
+                for i in range(6):
+                    o = base + i * 3 + c
+                    error = src[o] - outrgb[i * 3 + c]
+                    src[o + 3] = _sam_clamp(src[o + 3] + _sam_tdiv(error * _SAM_FS0, _SAM_FSX))
+                    src[o + stride - 3] += _sam_tdiv(error * _SAM_FS1, _SAM_FSX)
+                    src[o + stride] += _sam_tdiv(error * _SAM_FS2, _SAM_FSX)
+                    src[o + stride + 3] += _sam_tdiv(error * _SAM_FS3, _SAM_FSX)
+                for i in range(-1, 7):
+                    o = base + i * 3 + c + stride
+                    src[o] = _sam_clamp(src[o])
+
+            bg, fg = _sam_domove(command, bg, fg)
+            out[y * HIRES_ROW_BYTES + cx] = command
+
+    if progress:
+        print(file=sys.stderr)
+
+    return bytes(out)
+
+
+# -------------------------------------------------------------------------
 # Output writers
 # -------------------------------------------------------------------------
 
@@ -446,7 +773,7 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", help="source image (JPG/PNG/...)")
     ap.add_argument("output", help="output file (.bin or .h, see --format)")
-    ap.add_argument("--mode", choices=["mono", "colored", "aic"], default="mono")
+    ap.add_argument("--mode", choices=["mono", "colored", "aic", "samhocevar"], default="mono")
     ap.add_argument("--dither", choices=list(DITHERERS), default="floyd-steinberg")
     ap.add_argument("--format", choices=["bin", "header"], default="bin")
     ap.add_argument("--label", default="oric_image", help="C array name for --format header")
@@ -458,6 +785,11 @@ def main():
     ap.add_argument("--aic-paper0", type=color_index, default=0, help="aic mode: even-row paper, default black")
     ap.add_argument("--aic-ink1", type=color_index, default=6, help="aic mode: odd-row ink, default cyan")
     ap.add_argument("--aic-paper1", type=color_index, default=0, help="aic mode: odd-row paper, default black")
+    ap.add_argument("--samhocevar-depth", type=int, default=_SAM_DEPTH_DEFAULT,
+                     help="samhocevar mode: recursive lookahead depth (upstream default 2; "
+                          "3 is documented as better but slower still). Expect real per-image "
+                          "runtimes of minutes, not seconds -- this mode is a much slower, "
+                          "much more thorough search than colored/aic.")
     args = ap.parse_args()
 
     if args.width != HIRES_WIDTH_PX or args.height != HIRES_ROWS:
@@ -473,6 +805,8 @@ def main():
         data = convert_colored(img, args.dither)
     elif args.mode == "aic":
         data = convert_aic(img, args.aic_ink0, args.aic_paper0, args.aic_ink1, args.aic_paper1, args.dither)
+    elif args.mode == "samhocevar":
+        data = convert_samhocevar(img, depth=args.samhocevar_depth, progress=True)
     else:
         print(f"ERROR: --mode {args.mode} not implemented yet", file=sys.stderr)
         return 1

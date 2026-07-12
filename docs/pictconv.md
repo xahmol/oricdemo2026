@@ -11,8 +11,9 @@ tool — same byte format and the same per-scanline colour-attribute
 optimisation idea (`colored` mode, below) — but is a fresh Python
 implementation, not a port of that tool's C++ structure.
 
-Implemented so far: `mono`, `colored`, `aic`. Not implemented, with the
-actual reason for each (checked against pictconv's source, not assumed):
+Implemented so far: `mono`, `colored`, `aic`, `samhocevar`. Not implemented,
+with the actual reason for each (checked against pictconv's source, not
+assumed):
 
 - **`-f5`/`-f5z` charmap**: genuinely out of scope — it converts to a
   *character set + text-screen* representation (TEXT mode), not a HIRES
@@ -23,34 +24,33 @@ actual reason for each (checked against pictconv's source, not assumed):
   this project's HIRES bytes use everywhere else (`include/hires.h`) —
   output from this mode isn't a displayable HIRES bitmap under that
   convention at all, so there's nothing for `hb_*`/`hires.c` to consume.
-- **`-f2` RGB and `-f4` RB (scanline colour-channel decomposition)**,
-  **`-f6` Sam Hocevar dithering**: genuinely valid, general-purpose Oric
-  HIRES techniques, same as `mono`/`colored`/`aic` — **not implemented yet
-  for scope/time reasons, not because they're irrelevant** (an earlier,
-  inaccurate version of this note bundled them in with pictconv's
-  Atari ST/Limitless *machine* formats, which really are irrelevant here;
-  that was wrong). RGB/RB write a raw INK attribute (`R`/`G`/`B` cycling
-  every 3 rows for RGB, `R`/`GB` every 2 rows for RB) at the start of each
-  scanline, then encode per-pixel brightness as ink-on/paper-off for that
-  row's single colour channel — relying on real composite/RGB CRT scanline
-  bleed to perceptually blend adjacent channel-rows into a fuller colour
-  image (conceptually similar to `aic`'s 2-line ink/paper alternation, but
-  3-channel and reliant on analogue blending that Oricutron/Phosphoric
-  don't reproduce, so it won't look right on an emulator screenshot). Sam
-  Hocevar's method is an alternative dithering algorithm for the monochrome
-  case. Flag if you'd like these added.
+- **`-f2` RGB and `-f4` RB (scanline colour-channel decomposition)**:
+  genuinely valid, general-purpose Oric HIRES techniques, same as
+  `mono`/`colored`/`aic`/`samhocevar` — **not implemented yet for scope/time
+  reasons, not because they're irrelevant**. RGB/RB write a raw INK
+  attribute (`R`/`G`/`B` cycling every 3 rows for RGB, `R`/`GB` every 2 rows
+  for RB) at the start of each scanline, then encode per-pixel brightness as
+  ink-on/paper-off for that row's single colour channel — relying on real
+  composite/RGB CRT scanline bleed to perceptually blend adjacent
+  channel-rows into a fuller colour image (conceptually similar to `aic`'s
+  2-line ink/paper alternation, but 3-channel and reliant on analogue
+  blending that Oricutron/Phosphoric don't reproduce, so it won't look right
+  on an emulator screenshot). Flag if you'd like these added.
+- **`-f6` Sam Hocevar dithering ("img2oric")**: implemented as `samhocevar`,
+  see its own section below.
 
 ## CLI
 
 ```
 python3 tools/oric_pictconv.py INPUT OUTPUT
-  --mode {mono,colored,aic}                  (default: mono)
-  --dither {none,ordered,floyd-steinberg}    (default: floyd-steinberg)
+  --mode {mono,colored,aic,samhocevar}       (default: mono)
+  --dither {none,ordered,floyd-steinberg}    (default: floyd-steinberg; ignored by samhocevar)
   --format {bin,header}                      (default: bin)
   --label NAME        C array name for --format header (default: oric_image)
   --ink/--paper NAME-OR-0-7      mono mode ink/paper (default: white/black)
   --aic-ink0/--aic-paper0/--aic-ink1/--aic-paper1
                        aic mode even/odd-row ink/paper (default: white/black, cyan/black)
+  --samhocevar-depth N  samhocevar mode recursive lookahead depth (default: 2)
 ```
 
 `--format bin` writes a flat 8000-byte stream matching `HIRESVRAM`'s
@@ -129,6 +129,46 @@ attribute pair, baked directly into the output data (a self-contained
 blob — no separate `hires_aic_apply_range()` runtime call needed), costing
 the first 12 pixels of every scanline — the same documented hardware
 constraint colored mode's attribute insertions run into.
+
+## Sam Hocevar mode ("img2oric", upstream `-f6`)
+
+A much more thorough, much slower alternative to `colored`/`aic`'s own
+per-scanline optimizers: a per-6-pixel-block search with 2-block recursive
+lookahead (`--samhocevar-depth`, default 2 — matches upstream's own `DEPTH`;
+3 is documented upstream as better still, slower still), scoring each of 34
+candidate commands (ink/paper change, direct or inverse-video, or plain
+pixel printing) against a gamma-corrected perceptual error metric, with full
+Floyd-Steinberg-style error diffusion into the row below as well as
+sideways — not just a flat nearest-colour dither like `mono`/`aic` use.
+
+Unlike `colored`/`aic` above (adapted "in the spirit of" pictconv's C++,
+not literal ports), this **is** a close, near-line-by-line port of
+`oric_converter_samhocevar.cpp` (Sam Hocevar, "img2oric", 2008, WTFPL) —
+the quality comes from its exact, empirically-tuned constants and
+recursive structure, so approximating it loosely would lose the point of
+having it. Two deliberate deviations from the upstream source (both safety
+fixes, not behaviour changes — see the code's own header comment in
+`tools/oric_pictconv.py` for the full detail): the dead, never-read
+`maxerror` parameter is dropped, and the pixel buffer's edge padding is
+sized generously enough to cover the recursion's own worst-case lookahead
+distance, instead of upstream's tighter padding (which relies on C
+pointer arithmetic silently reading past its own buffer's real bounds near
+the right/left edges — undefined behaviour that Python's bounds-checked
+lists won't tolerate).
+
+**Expect real per-image runtimes in minutes, not seconds** — this is a
+pure-Python translation of an algorithm upstream itself describes as
+"much much slower than other methods," with no vectorization. `--dither`
+is ignored in this mode (the algorithm has its own built-in diffusion).
+
+**When it's actually worth reaching for**: not a blanket upgrade over
+`mono`/`aic` — those already produce clean results on source art suited to
+HIRES's constraints (flat regions, line art, existing hatching/dither, high
+native contrast — see the "Art content" reasoning in the project's own demo
+plan). Sam's method earns its cost specifically on trickier, more
+continuous-tone source images where `mono`/`aic`/`colored` produce visible
+banding or noise — try the cheaper modes first and only reach for
+`samhocevar` if they fall short.
 
 ## Testing
 
