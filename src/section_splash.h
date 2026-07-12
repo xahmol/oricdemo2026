@@ -11,7 +11,7 @@
 //
 // Like every other section, this one's own _tick() naturally reaches a
 // finished state (the fade-out completes) well before any caller-imposed
-// time limit -- see main.c's DemoSection.tick return value.
+// time limit -- see section_common.h's section_mark_finished().
 
 #ifndef SECTION_SPLASH_H
 #define SECTION_SPLASH_H
@@ -23,11 +23,12 @@
 // resets the fade state machine to its starting (fade-in) state.
 void section_splash_init(const HiresBitmap *screen);
 
-// One fade step. Returns true once the fade-out has fully completed (the
-// screen is blank again) -- the caller (main.c's run_section()) advances
-// to the next section immediately when this returns true, regardless of
-// its own min_ticks/max_ticks bookkeeping.
-bool section_splash_tick(const HiresBitmap *screen);
+// One fade step. Calls section_mark_finished() once the fade-out has fully
+// completed (the screen is blank again) -- the caller (main.c's
+// run_section()) advances to the next section immediately once that
+// happens, regardless of its own min_ticks/max_ticks bookkeeping. `void`,
+// not `bool` -- see section_common.h's own header comment for why.
+void section_splash_tick(const HiresBitmap *screen);
 
 #pragma compile("section_splash.c")
 

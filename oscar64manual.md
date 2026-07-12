@@ -1742,6 +1742,161 @@ silently re-break a caller's save-set. Full writeup with addresses/diffs:
 computed values, no visible corruption) — see "Same `-O2` allocator bug"
 above, in the Non-C64 Bare-Metal Targets section.
 
+**`-O2` drops a `bool`-returning function's return-value store into `accu`**
+(discovered oricdemo2026, 2026-07-11)
+
+A DIFFERENT `-O2` bug, also whole-program, also found via emulator RAM-dump +
+PC-trace. Affects any function called through a stored function pointer
+(a dispatch-table `tick(screen)` callback, in this case) whose implementation's
+tail is `[call a void helper][load/compute a value][RTS]` with no other cleanup
+in between: the compiler skips storing the result into `accu` — Oscar64's own
+documented return-value location — leaving it only in the transient real A
+register. If the CALLER reads the return value only after other code that
+clobbers A (e.g. a pacing busy-wait between the call and the check — an
+entirely ordinary, correct pattern), it silently reads stale garbage instead.
+Symptom looks exactly like a hang/infinite-loop from the caller's side (nothing
+ever advances past that dispatch call again), while the callee itself keeps
+running correctly forever — confirmed via a temporary tick counter in the
+callee that kept incrementing while the caller behaved as if told "finished"
+on the very first call, always.
+
+A sibling function in the same file, with the byte-for-byte identical
+`return false;` source, was unaffected purely because it happens to need its
+own stack-frame cleanup right before its `RTS` (it calls several sub-functions
+needing arg marshaling) — generating that cleanup incidentally forces the
+`accu` store too. The bug is present either way; it only shows up in whichever
+sibling has nothing else going on right before its own `return`.
+
+**What did NOT fix it**, in order (each confirmed still broken by re-checking
+the `.asm`): a named local: same broken tail (constant-folded away). A
+`static volatile bool`, unwritten elsewhere: `volatile` alone doesn't block
+constant propagation for a provably-single-valued static; same tail. A
+genuinely non-foldable runtime comparison (against a different file's
+non-`static volatile` global mutated by an ISR): forced real comparison code,
+but STILL omitted the `accu` store in both branches — confirms the bug is
+about the tail *shape*, not about constant-foldability. A bare
+`return __asm { lda #0; sta accu };`: Oscar64 traces even inline asm well
+enough to prove it always yields 0, and reduces the whole function back to
+the same broken constant-return codegen anyway.
+
+**"Fix" that worked functionally but was CONFIRMED UNSAFE — do not use**:
+`__asm volatile` writing all four `accu` bytes made the return value read
+correctly (confirmed via a debug counter), but a LONGER real-time soak test
+(hundreds of millions of cycles, not just a quick RAM-dump check) showed the
+whole program eventually hanging anyway elsewhere — an unrelated
+`__interrupt` music-tick handler ended up stuck or the CPU jumped into
+unrelated DATA. Hand-writing compiler-internal scratch registers from inline
+asm isn't safe just because it fixes the one read site you're targeting. The
+actual safe fix: stop routing "finished" through a return value crossing any
+intervening code at all — change the callback to `void` and signal
+completion via a plain function call to a shared flag-setting helper
+instead. Confirmed safe via a 1.5-billion-cycle (~25 real-minute) soak test
+on both build targets. Practical implication: any dispatch-table callback
+ending in `[void call][return simple/constant expr]` is a silent risk under
+`-O2` — check every candidate handler's own compiled tail (look for a bare
+`RTS` not preceded by an `accu` store), don't assume "if one handler's fine,
+they all are," and never "fix" it with inline asm into `accu` — change the
+calling convention instead.
+
+**Whole-program allocator can silently break an UNRELATED `__interrupt`
+handler when a normal function's own complexity changes** (discovered
+oricdemo2026, 2026-07-11, follow-up investigation 2026-07-11)
+
+A THIRD distinct whole-program `-O2` bug — this project's own
+`src/section_logo.c` raster-bar effect. Adding ANY per-row colour-varying
+value to a normal (non-interrupt) function elsewhere in the program — an
+array lookup, a divmod-free rewrite of the same lookup, that lookup
+extracted to its own small helper, a plain `switch` instead of a lookup, or
+even a version with NO time-varying state at all (a compile-time-constant
+array indexed only by loop position) — reproducibly hung the WHOLE PROGRAM
+after anywhere from under a minute to tens of minutes of real playback: the
+Arkos Tracker music player's `__interrupt` 50Hz tick handler
+(`arkos_tick()`/`arkos_advance_pattern()`, `include/arkos.c`) ends up stuck
+forever, or the CPU jumps into unrelated DATA bytes and executes them.
+Confirmed only via a real, long (hundreds of millions of cycles) headless
+Phosphoric soak test — invisible in a short run or a single RAM-dump.
+
+A follow-up session disproved the obvious theory ("same as the caller-save
+under-count bug above"): a `-g` disassembly diff of `arkos_tick()`'s own
+compiled prologue between a safe build and a hang-reproducing build was
+BYTE-IDENTICAL (only unrelated data addresses differed) — this is NOT a
+static save-set gap. It also requires an ACTUAL interrupt firing live
+(proven safe for 400M+ cycles with Arkos never loaded/registered) and
+specifically needs `arkos_tick()`'s own callees to process genuinely
+time-varying real song data, not merely "this code path runs" (forcing/
+suppressing `arkos_advance_pattern()` in a degenerate, repetitive way was
+safe either way) — a genuine runtime race, not a build-time code-shape
+defect. An IRQ-level trace (`--trace-irq`) confirmed clean, regular
+ENTRY/RTI pairs right up to the one that never returns, and — surprisingly
+— that fatal interrupt's own landing point, and every other interrupt
+across the traced run, never fell inside the offending raster-bar
+function's own code at all; the eventual frozen PC sat inside a
+legitimate, UNCORRUPTED BSS lookup table (`hires_col_byte`), meaning some
+JUMP/RETURN target elsewhere had been corrupted to point there (consistent
+with a stray write hitting the hardware stack, not a missing save). The
+exact instruction responsible was not pinned down — that needs live
+instruction-level tracing across millions of instructions to catch an
+event that's evidently rare even when it does occur. Full writeup with
+every experiment (both the original session's and the follow-up's) and
+every disproved theory: `~/.claude/oscar64.md`. Safest known response,
+currently applied in `src/section_logo.c`: revert to no time-varying
+per-row value at all (every row painted in one call gets the identical
+colour) — every alternate implementation tried (across two full sessions)
+reproduced the same bug.
+
+**RESOLVED** (third session, 2026-07-12): NOT a caller-save-set bug, NOT
+an Arkos bug, NOT a bird-sprite bug (all directly checked and ruled out
+this session — in particular, the corrupting write occurs while
+`section_logo` is the active section, well before `section_bird` ever
+runs) — a genuine Oscar64 **inliner** bug. `include/hires.c`'s
+`hires_row_off[y]` (a `uint16_t` table indexed by an 8-bit row) requires
+doubling `y` into a 16-bit value via `ASL`+`ROL` on a zero-page pair. A
+hand-written loop calling `hires_row_colors()` repeatedly (this project's
+`set_rows()` in `src/section_logo.c`) compiles CORRECTLY as a standalone
+`JSR`'d function — disassembly shows an explicit `LDA #$00` resetting the
+address's high byte every iteration before the next `ASL`/`ROL`. But when
+Oscar64 INLINES that same loop directly into a caller — confirmed for
+`section_logo_tick()`'s own literal-constant-argument call, `set_rows
+(bar_y, BAR_HEIGHT, A_FWWHITE, A_BGBLACK)` — the inlined copy DROPS that
+reset, so every iteration after the first doubles the row index against
+a STALE high byte left over from the SAME zero-page cell's prior use
+(that slot doubles as the loop's just-computed HIRESVRAM destination
+high byte too) — deriving a wrong table-lookup address that reads an
+arbitrary on-screen pixel/attribute byte as if it were a row offset.
+This lands back in valid VRAM by chance almost always (`+ $A0` mod 256 on
+an arbitrary byte usually stays in range) — explaining the 1.5B+ prior
+clean soak cycles: this bug has plausibly always been latent in any loop
+calling `hires_row_colors()`/`hires_put_ink`/`hires_put_paper`, not
+introduced by the colour-cycling change. It only turns fatal when the
+misread on-screen byte is large enough to wrap past `$FF` — confirmed via
+a cycle-exact Phosphoric `--trace` capture wrapping into
+`arkos_advance_pattern()`'s own compiled code and overwriting 2
+instruction bytes with the exact ink/paper values being painted
+($07/$10 = `A_FWWHITE`/`A_BGBLACK`), which is exactly why the symptom
+looked Arkos-shaped in both earlier sessions — the real bug is entirely
+in `include/hires.c`'s compiled address arithmetic and has nothing to do
+with Arkos, interrupts, or the bird scene.
+
+**Fix, applied in `src/section_logo.c`**: `__noinline` on `set_rows()`
+forces every call site — including the literal-constant-argument one
+that triggered the inlining — through the one correctly-compiled
+function body. Confirmed via disassembly (post-fix: plain `JSR`,
+`LDA #$00` reset present) and a full soak-test re-run with a real
+per-row colour-varying `paint_bar()` re-enabled: `make`/`make disk`
+clean, `make test`/`make test-disk` both green, and healthy, PROGRESSING
+(never-repeating) PC/registers at 100M/300M/500M/700M/1000M/1500M cycles
+on BOTH build targets, no "CPU halted" at any sample — the multi-colour
+raster bar is genuinely fixed this time, not reverted-and-avoided.
+
+**Practical takeaway for future hangs with a similarly Arkos/interrupt-
+shaped symptom**: if every targeted check of the suspected subsystem
+comes up clean (as items 1-7 of the follow-up session above conclusively
+did for Arkos), diff the WHOLE PROGRAM's compiled function SIZES (not
+just the suspected function) between a safe and a broken build — here,
+every function in `arkos.c`/`hires.c`'s hot paths was byte-identical
+except `section_logo_tick`/`set_rows`/`paint_bar` themselves, which is
+the one fact that redirected the investigation to the real culprit.
+
 ---
 
 ## Oric Atmos Project Library API (`include/charwin.h/c`)

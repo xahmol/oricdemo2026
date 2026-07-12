@@ -19,6 +19,8 @@
 #include "section_clouds.h"
 #include "section_splash.h"
 #include "section_logo.h"
+#include "section_hires_showcase.h"
+#include "section_common.h"
 #include "rom_charset.h"
 #include "idi8b_altcharset.h"
 
@@ -96,18 +98,45 @@ __interrupt void main_frame_tick_isr(void)
 // a section is never skipped before it's even had a chance to show
 // anything), and the section is force-advanced at `max_ticks` even with
 // no keypress at all (so a section can never hang the demo forever).
-// `tick` returns true once the section has naturally finished on its own
-// (e.g. section_splash.c's fade-out completing) -- run_section() below
-// advances immediately when that happens, regardless of min_ticks/
-// max_ticks; a section with no natural end (the bird scene) simply
-// always returns false.
+//
+// `tick` is `void`, NOT `bool` -- a section that naturally finishes (e.g.
+// section_splash.c's fade-out completing) calls section_mark_finished()
+// (section_common.h) instead of returning a value; run_section() below
+// checks/resets that flag once per iteration and advances immediately when
+// it's set, regardless of min_ticks/max_ticks. A section with no natural
+// end (the bird scene, the logo's indefinitely-circling raster bar) simply
+// never calls it. See section_common.h's own header comment for exactly
+// why this is `void` and not `bool`: an earlier `bool`-returning design,
+// with "finished" read back out of a function pointer's return value, hit
+// a real Oscar64 -O2 code-generation bug (a tick() implementation whose
+// tail is [call a void helper][load/compute a value][RTS] with nothing
+// else in between doesn't reliably get its return value stored anywhere
+// durable) that a same-file sibling function's own unrelated stack-cleanup
+// code happened to mask. An inline-asm workaround forcing that store was
+// tried and confirmed UNSAFE in practice: it crashed the floppy target to
+// Oricutron's monitor and hung Phosphoric outright (most likely by
+// clobbering zero-page state something else nearby still needed) --
+// reordering when run_section() read the value didn't help either, since
+// the callee still never wrote it in the first place regardless of when
+// the caller looked. Communicating "finished" via a plain function call
+// instead sidesteps the whole bug class permanently: a void function's
+// return path never goes through the compiler's return-value machinery at
+// all, so there is nothing left for this bug (or any sibling of it) to
+// corrupt.
 typedef struct
 {
     void (*init)(const HiresBitmap *screen);
-    bool (*tick)(const HiresBitmap *screen);
+    void (*tick)(const HiresBitmap *screen);
     uint16_t min_ticks;
     uint16_t max_ticks;
 } DemoSection;
+
+static bool section_finished_flag;
+
+void section_mark_finished(void)
+{
+    section_finished_flag = true;
+}
 
 // Runs one section to completion: its own init, then tick+pace every
 // iteration until the section itself signals it's finished, a keypress
@@ -121,22 +150,114 @@ static void run_section(const DemoSection *section, const HiresBitmap *screen)
 {
     uint16_t elapsed = 0;
 
+    section_finished_flag = false;
     section->init(screen);
     for (;;)
     {
         uint8_t start_tick = main_frame_tick;
-        bool finished = section->tick(screen);
+        section->tick(screen);
 
         while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
             ;
 
         elapsed++;
-        if (finished)
+        if (section_finished_flag)
             return;
         if (elapsed >= section->max_ticks)
             return;
         if (elapsed >= section->min_ticks && keyb_check())
             return;
+    }
+}
+
+// Wipes the just-finished section's content before the next section's own
+// init runs, rather than letting one section's leftover pixels/attributes
+// sit there until the next section happens to overdraw them (most _init()
+// functions already hb_fill() a blank canvas themselves, but that's an
+// INSTANT cut -- this gives every section boundary a visible transition
+// instead). A left-to-right sweeping "curtain": each tick, blanks the next
+// TRANSITION_COLS_PER_TICK column-bytes (all 200 rows), growing the wipe
+// rightward until the whole 40-column canvas is blank.
+//
+// Deliberately a raw per-row memset(), NOT hb_rect_fill() (tried first,
+// then measured via a real Phosphoric RAM-dump/PC-sample investigation --
+// the CPU was found parked inside hb_put() for tens of millions of cycles,
+// tens of REAL SECONDS, on just one section transition): hb_rect_fill()
+// draws one pixel at a time via hb_put() -- correct for arbitrary
+// shapes, but for a solid full-height column band that's HIRES_ROWS *
+// (TRANSITION_COLS_PER_TICK*6) = 4800 individual hb_put() calls per tick,
+// 48000 total for the full sweep, each far more expensive than a raw byte
+// write once row-offset/bit-mask lookups are involved. A column band is
+// always BYTE-aligned already (columns here are column-BYTES, not
+// pixels -- HIRES_ROW_BYTES of them per row, 6px each), so memset()int
+// straight into HiresBitmap's own data is both correct and the same
+// "raw byte fill" hb_fill() itself already relies on for instant full-
+// screen clears -- just scoped to one column band instead of the whole
+// row. 0x40 is HIRES's own "blank" byte value (bit6 set, no pixel bits) --
+// same convention hb_fill(screen, 0x40) and hb_set()/hb_clr() already use
+// (see hires.c's own header comment on that bit).
+//
+// The sweep also blanks column-bytes 0-1 of every row -- the row's own
+// ink/paper CONTROL bytes, not ordinary pixel data (see hires.h's own
+// comment on why those two columns are special) -- exactly like every
+// section's own hb_fill(screen, 0x40) already does before it calls
+// hires_row_colors() to re-assert real values. hires_row_colors_range()
+// below does exactly that re-assertion, once, after the sweep completes,
+// resetting the whole screen to a plain white-ink/black-paper baseline so
+// the next section's own init starts from a known-clean state.
+#define TRANSITION_COLS_PER_TICK 4u
+#define TRANSITION_TOTAL_COLS    (HIRES_ROW_BYTES)
+
+// Blanks one column-band (all HIRES_ROWS rows) -- split out into its own
+// small helper, rather than nested inside transition_clear() itself, to
+// keep transition_clear()'s own live-local footprint small. This isn't
+// just style: a real, previously-documented Oscar64 -O2 whole-program
+// register-allocator bug (~/.claude/oscar64.md: "caller-save set can be
+// under-counted") silently corrupted a DIFFERENT live zero-page value
+// elsewhere when this logic was written as one larger function with more
+// simultaneously-live locals (col/row/start_tick all in one frame) --
+// confirmed via a real crash (Oricutron floppy target monitor-trapped,
+// Phosphoric hung, both with the CPU found parked executing DATA bytes as
+// instructions after a corrupted jump). Splitting the row-loop out into
+// its own minimal-footprint function avoided it. Do not merge this back
+// into transition_clear() without re-testing a full run all the way
+// through a real section transition in the emulator.
+static void transition_clear_band(uint8_t *data, uint8_t col)
+{
+    uint8_t row;
+    for (row = 0; row < HIRES_ROWS; row++)
+        memset(data + (uint16_t)row * HIRES_ROW_BYTES + col, 0x40, TRANSITION_COLS_PER_TICK);
+}
+
+static void transition_clear(const HiresBitmap *screen)
+{
+    uint8_t col;
+
+    for (col = 0; col < TRANSITION_TOTAL_COLS; col = (uint8_t)(col + TRANSITION_COLS_PER_TICK))
+    {
+        uint8_t start_tick = main_frame_tick;
+        transition_clear_band(screen->data, col);
+        while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
+            ;
+    }
+
+    // A plain loop, not dissolve.h's hires_row_colors_range() -- pulling in
+    // that entire compilation unit for one trivial ranged loop isn't
+    // justified (nothing else in this program uses dissolve.c), and this
+    // project's own Oscar64 -O2 whole-program register allocator is
+    // demonstrably sensitive to total program size in ways that can
+    // silently corrupt unrelated code (~/.claude/oscar64.md's "caller-save
+    // set can be under-counted" -- confirmed here too: pulling in
+    // dissolve.c pushed a real Arkos Tracker __interrupt handler,
+    // arkos_tick(), right up against Oscar64's own documented
+    // "-O" -level-sensitive interrupt-complexity limit, silently
+    // corrupting its behaviour rather than hard-erroring -- reverting this
+    // one dependency was enough to fix it, confirmed via a real emulator
+    // soak test). Keeping this inline avoids the whole risk category.
+    {
+        uint8_t y;
+        for (y = 0; y < HIRES_ROWS; y++)
+            hires_row_colors(y, A_FWWHITE, A_BGBLACK);
     }
 }
 
@@ -158,42 +279,57 @@ static void bird_scene_init(const HiresBitmap *screen)
     section_bird_init(screen);
 }
 
-static bool bird_scene_tick(const HiresBitmap *screen)
+static void bird_scene_tick(const HiresBitmap *screen)
 {
     section_background_tick(screen);
     section_clouds_tick(screen);
     section_bird_tick(screen);
-    return false;   // no natural end -- runs until skipped or timed out
+    // no natural end -- never calls section_mark_finished(); runs until
+    // skipped or timed out
 }
 
 // idi8b splash: min_ticks keeps an impatient keypress from insta-skipping
 // before the logo has had a moment to render; max_ticks (~37s) is purely
-// a safety backstop -- the section almost always finishes on its own (its
-// own tick() returns true once the fade-out completes) well before this
-// would ever fire. Now a normal HIRES-mode section like any other (it
-// used to run outside the sections[] table, before hires_on() -- see git
-// history -- back when it was TEXT-mode content; moving it to HIRES mode
-// removed that whole special case).
+// a safety backstop -- the section almost always finishes on its own
+// (its own tick() calls section_mark_finished() once the fade-out
+// completes) well before this would ever fire. Now a normal HIRES-mode
+// section like any other (it used to run outside the sections[] table,
+// before hires_on() -- see git history -- back when it was TEXT-mode
+// content; moving it to HIRES mode removed that whole special case).
 #define SPLASH_MIN_TICKS 20u
 #define SPLASH_MAX_TICKS 500u
 
 // HIRES Oric logo + circling raster bars: circles indefinitely (its own
-// tick() always returns false, see section_logo.c), so min_ticks/
-// max_ticks are the only thing pacing it -- min_ticks keeps an impatient
-// keypress from insta-skipping before the bar has completed even one
-// pass, max_ticks (~22s) gives a reasonable amount of time to watch the
-// circling effect before moving on regardless.
+// tick() never calls section_mark_finished(), see section_logo.c), so
+// min_ticks/max_ticks are the only thing pacing it -- min_ticks keeps an
+// impatient keypress from insta-skipping before the bar has completed even
+// one pass, max_ticks (~22s) gives a reasonable amount of time to watch
+// the circling effect before moving on regardless.
 #define LOGO_MIN_TICKS 20u
 #define LOGO_MAX_TICKS 300u
 
+// Bird scene: now that section #4 exists to advance into, gets real
+// pacing instead of SECTION_FOREVER -- ~30s is enough to enjoy the
+// animation before moving on.
+#define BIRD_MIN_TICKS  20u
+#define BIRD_MAX_TICKS 400u
+
+// HIRES shapes showcase: its own tick() never calls section_mark_finished()
+// (the 4 shapes finish building after ~60 ticks, then it just holds the
+// completed picture) -- max_ticks (~11s) leaves a good stretch of hold
+// time after that before moving on regardless.
+#define HIRES_SHOWCASE_MIN_TICKS  20u
+#define HIRES_SHOWCASE_MAX_TICKS 150u
+
 // The demo's own running order -- currently the idi8b splash, the Oric
-// logo/raster-bar intro, and the one existing scene; later phases insert
-// the showcase sections/credits after (see this project's own planning
-// notes for the full list).
+// logo/raster-bar intro, the bird scene, and the HIRES shapes showcase;
+// later phases insert the remaining showcase sections/credits after (see
+// this project's own planning notes for the full list).
 static const DemoSection sections[] = {
     { section_splash_init, section_splash_tick, SPLASH_MIN_TICKS, SPLASH_MAX_TICKS },
     { section_logo_init, section_logo_tick, LOGO_MIN_TICKS, LOGO_MAX_TICKS },
-    { bird_scene_init, bird_scene_tick, SECTION_FOREVER, SECTION_FOREVER },
+    { bird_scene_init, bird_scene_tick, BIRD_MIN_TICKS, BIRD_MAX_TICKS },
+    { section_hires_showcase_init, section_hires_showcase_tick, HIRES_SHOWCASE_MIN_TICKS, HIRES_SHOWCASE_MAX_TICKS },
 };
 #define NUM_SECTIONS (sizeof(sections) / sizeof(sections[0]))
 
@@ -308,7 +444,10 @@ int main(void)
     {
         uint8_t i;
         for (i = 0; i < NUM_SECTIONS; i++)
+        {
             run_section(&sections[i], &screen);
+            transition_clear(&screen);
+        }
     }
 
     return 0;

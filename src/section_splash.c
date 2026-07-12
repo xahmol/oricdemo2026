@@ -32,6 +32,7 @@
 #include "handwriting_font.h"
 #include "idi8b_logo.h"
 #include "section_splash.h"
+#include "section_common.h"
 
 #define SPLASH_LOGO_ROWS  12u    // idi8b_logo[] rows 0-11 (row 12 is separate)
 #define SPLASH_LOGO_COLS  40u
@@ -178,7 +179,7 @@ void section_splash_init(const HiresBitmap *screen)
     splash_draws_done = 0;
 }
 
-bool section_splash_tick(const HiresBitmap *screen)
+void section_splash_tick(const HiresBitmap *screen)
 {
     switch (splash_state)
     {
@@ -191,7 +192,7 @@ bool section_splash_tick(const HiresBitmap *screen)
             splash_state = SPLASH_HOLD;
             splash_hold_count = 0;
         }
-        return false;
+        break;
 
     case SPLASH_HOLD:
         splash_hold_count++;
@@ -207,18 +208,19 @@ bool section_splash_tick(const HiresBitmap *screen)
             // 65535-long period is far longer than the ~960 draws two
             // full fades consume, so no meaningful repeat risk).
         }
-        return false;
+        break;
 
     case SPLASH_FADE_OUT:
         splash_step(screen, false);
         if (splash_draws_done >= SPLASH_CELL_COUNT)
         {
             splash_state = SPLASH_DONE;
-            return true;
+            section_mark_finished();
         }
-        return false;
+        break;
 
     default:
-        return true;
+        section_mark_finished();
+        break;
     }
 }

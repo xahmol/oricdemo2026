@@ -19,7 +19,8 @@
 #include "hires.h"
 
 void section_logo_init(const HiresBitmap *screen);
-bool section_logo_tick(const HiresBitmap *screen);
+// void, not bool -- see section_common.h's own header comment for why.
+void section_logo_tick(const HiresBitmap *screen);
 
 #pragma compile("section_logo.c")
 

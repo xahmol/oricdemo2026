@@ -46,3 +46,9 @@ AddDefine LOADER_MUSIC_FILE {FileIndex}
 ; (STORAGE_FLOPPY) -- see src/section_logo.c's LOGO_FILE.
 AddFile {LOGO_BIN}
 AddDefine LOADER_LOGO_FILE {FileIndex}
+
+; File index 3: assets/boulesetbits.aky, the demo's SECOND music track,
+; loaded via arkos_load(3) (STORAGE_FLOPPY) -- see
+; src/section_hires_showcase.c's own MUSIC_FILE2.
+AddFile {MUSIC2_BIN}
+AddDefine LOADER_MUSIC2_FILE {FileIndex}
