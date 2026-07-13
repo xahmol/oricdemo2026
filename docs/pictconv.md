@@ -215,14 +215,22 @@ formulas, the "redmean"-style perceptual distance PictOric calls
 `dist2_alg=1` — its own default — the 256-entry Ostromoukhov
 variable-coefficient error-diffusion table, extracted programmatically
 from the Lua source rather than hand-typed, and the `calcErr`/`findRec`
-recursive search itself). Deliberately **not** ported: PictOric's own
-image loading/resizing/centering (this project's own `load_and_fit()`
-already does that job for every mode here, so `pictoric` reuses it
-rather than adding a second, inconsistent resize path), its own AIC
-mode (`--mode aic` above already covers that use case), its CIE-Lab-based
-alternative distance metrics (not the tool's own default), and its
-BMP/TAP file writer and GrafX2 integration (irrelevant — this project has
-its own CLI/output format).
+recursive search itself). **Also** ported (this was originally a "reuse
+this project's shared loader" simplification — see the byte-for-byte
+verification section below for why that turned out to matter more than
+expected): `load_and_fit_linear()`, a close port of PictOric's own
+`to_screen()`/`getLinearPixel()` — a box-filter average done in LINEAR
+light space, not gamma-encoded sRGB. This project's shared `load_and_fit()`
+(used by every other mode) resizes via PIL's LANCZOS filter directly on
+gamma-encoded bytes, then linearises after resizing — a real, if usually
+minor, difference from averaging light values themselves.
+
+Deliberately **not** ported: PictOric's own AIC mode (`--mode aic` above
+already covers that use case), its CIE-Lab-based alternative distance
+metrics (not the tool's own default), its "auto blank margin" heuristic
+(a one-off tuned for a specific title-screen image, not general-purpose),
+and its BMP/TAP file writer and GrafX2 integration (irrelevant — this
+project has its own CLI/output format).
 
 `--dither` is ignored (same as `samhocevar` — the algorithm has its own
 built-in diffusion). `--no-inverse-attr` is shared with `samhocevar`, see
@@ -302,6 +310,59 @@ published reference conversions, not just against each other:
   (independently-implemented algorithms), confirmed via a direct,
   non-recursive error calculation (not just visual impression), and
   confirmed fixable via `--no-inverse-attr`.
+- **Running the real upstream PictOric.lua directly** (not just reading
+  its source): built Lua 5.4 from source (no system package available
+  without `sudo`) and ran the actual, unmodified `PictOric.lua` against
+  the same source photos this project's own port was tested against,
+  diffing the real output byte-for-byte against `pictoric` mode's own
+  result. This is what the two fixes below came from — reading source
+  code alone would not have caught either.
+  - **Resize-domain fix**: PictOric's own `to_screen()`/`getLinearPixel()`
+    box-filter-averages in LINEAR light space; this project's shared
+    `load_and_fit()` (used by every other mode) resizes via PIL's LANCZOS
+    filter directly on gamma-encoded bytes, linearising only afterward.
+    `pictoric` mode now has its own `load_and_fit_linear()` matching
+    upstream's approach exactly, instead of reusing the shared loader —
+    confirmed via the byte diff that this was necessary for the first
+    several rows to match at all.
+  - **Padding-bleed fix, a real, visible bug**: on a source image needing
+    letterbox padding (aspect ratio narrower than 240x200), a colour pair
+    chosen for real content just before the padding began (e.g. `{ink=red,
+    paper=white}`, a good match for bright/warm content) was left active
+    straight into the padding region, which is genuinely pure black —
+    and red turns out to be numerically *closer* to black than white is,
+    so the padding rendered as a solid red streak instead of clean black.
+    This is the SAME root cause as the cyan-streak finding (the "neglect
+    cross-octet error" cost model doesn't account for how a colour choice
+    compounds across many subsequent blocks), but via a plain DIRECT
+    attribute change this time — `--no-inverse-attr` can't catch it, since
+    no inversion is involved. Confirmed by comparing against the real
+    upstream tool's own clean-black output on the identical row. Fixed
+    with a **targeted, low-risk special case**, not a change to the core
+    search: letterbox padding is always exactly `(0,0,0)` (a box-filter
+    average of real photo content essentially never produces this by
+    chance), so any row's *trailing* run of all-`(0,0,0)` blocks is
+    detected up front and excluded from the recursive search entirely,
+    then forced to render as clean black afterward (inserting one
+    paper-change-to-black attribute byte if needed) — real image content
+    is completely unaffected, since the detection is exact-equality, not
+    a threshold.
+  - **What remained unexplained, and was left as-is**: even after both
+    fixes, ~60% of bytes still differ from the real reference on a busy
+    photographic source — tracing the very first divergence (a single
+    flipped pixel bit, row 4 of the same test image) showed the
+    underlying colour-distance comparison was genuinely a near-exact tie
+    (within roughly 1%) on both sides, just resolving to opposite
+    outcomes. Given this algorithm makes many thousands of chained,
+    interdependent near-tie floating-point comparisons per image, a tiny
+    difference at any single point (from a rounding difference in some
+    intermediate step, not necessarily a logic bug) cascades through
+    later error-diffusion and search decisions and amplifies into
+    visibly different, though not necessarily *worse*, output. This
+    project's own regression fixtures use small synthetic images with
+    no near-ties (flat colours, hard edges) specifically so they stay
+    deterministic and byte-exact — real photographic source content does
+    not have that property, in either implementation.
 
 ## Testing
 

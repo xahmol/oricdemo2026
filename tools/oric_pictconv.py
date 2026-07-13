@@ -19,6 +19,7 @@ Requires Pillow (see tools/requirements.txt): pip install -r tools/requirements.
 """
 
 import argparse
+import math
 import sys
 
 from PIL import Image
@@ -1012,18 +1013,84 @@ def _pictoric_diffuse_real(ostro, col, err, target0, target1, target2):
         target2[ch] += e * coefs[2]
 
 
-def convert_pictoric(img, progress=False, allow_inverse_attr=True):
-    width, height = HIRES_WIDTH_PX, HIRES_ROWS
+def load_and_fit_linear(path, width, height):
+    """PictOric's OWN image loading (`to_screen()`/`getLinearPixel()` in
+    PictOric.lua), NOT this project's shared `load_and_fit()` used by every
+    other mode. The difference matters and is not cosmetic: this box-filter
+    AVERAGES samples in LINEAR light space (correct, physically-meaningful
+    downsampling), whereas `load_and_fit()` resizes via PIL's LANCZOS filter
+    directly on gamma-encoded sRGB bytes, then linearises AFTER resizing.
+    Confirmed empirically (not assumed) to matter: running this project's
+    own port against the real upstream Lua tool (built from source and run
+    directly -- see docs/pictconv.md's own verification section) on the
+    same source photo showed the first few rows only matched byte-for-byte
+    once this same aspect-fit + linear-space box-filter was used instead of
+    the shared loader. Same aspect-fit/centering logic as `to_screen()`:
+    scale by whichever dimension is NOT the limiting one, centering the
+    other. Returns a list of `height` rows, each a list of `width` linear
+    (r, g, b) float tuples -- not a PIL Image, since converting back to
+    sRGB bytes and re-linearising would lose precision for no reason."""
+    img = Image.open(path).convert("RGB")
+    src_w, src_h = img.size
     px = img.load()
-    num_blocks = width // 6
 
-    src_lin = [[None] * width for _ in range(height)]
-    for y in range(height):
-        for x in range(width):
-            r, g, b = px[x, y]
-            src_lin[y][x] = (
-                _PICTORIC_LINEAR_LUT[r], _PICTORIC_LINEAR_LUT[g], _PICTORIC_LINEAR_LUT[b],
-            )
+    def to_screen(x, y):
+        if src_w / src_h < width / height:
+            i = x * src_h / height
+            j = y * src_h / height
+            i += (src_w - width * src_h / height) / 2
+        else:
+            i = x * src_w / width
+            j = y * src_w / width
+            j += (src_h - height * src_w / width) / 2
+        return math.floor(i), math.floor(j)
+
+    def linear_pixel(ox, oy):
+        # Matches PictOric.lua's own getLinearPixel(): out-of-bounds source
+        # coordinates contribute BLACK (0,0,0), not "skip this sample" --
+        # confirmed via a byte-for-byte diff against the real upstream
+        # tool's own output (see docs/pictconv.md's verification section)
+        # that clamping/skipping out-of-bounds samples instead of treating
+        # them as black is a real, if narrow, divergence from upstream.
+        if ox < 0 or oy < 0 or ox >= src_w or oy >= src_h:
+            return (0.0, 0.0, 0.0)
+        r, g, b = px[ox, oy]
+        return (_PICTORIC_LINEAR_LUT[r], _PICTORIC_LINEAR_LUT[g], _PICTORIC_LINEAR_LUT[b])
+
+    rows = [[(0.0, 0.0, 0.0)] * width for _ in range(height)]
+    for oy in range(height):
+        for ox in range(width):
+            x1, y1 = to_screen(ox, oy)
+            x2, y2 = to_screen(ox + 1, oy + 1)
+            if x2 == x1:
+                x2 = x1 + 1
+            if y2 == y1:
+                y2 = y1 + 1
+            sr = sg = sb = 0.0
+            # Divisor is the FULL window area, matching upstream -- not the
+            # count of in-bounds samples only (see linear_pixel()'s own
+            # comment above).
+            n = (y2 - y1) * (x2 - x1)
+            for j in range(y1, y2):
+                for i in range(x1, x2):
+                    lr, lg, lb = linear_pixel(i, j)
+                    sr += lr
+                    sg += lg
+                    sb += lb
+            if n > 0:
+                avg = (sr / n, sg / n, sb / n)
+                # Snap near-black to exact black, matching upstream's own
+                # `if max(p)<4/(255*12.92) then p:mul(0)` -- a tiny fixed
+                # threshold, not something to round off as noise.
+                if max(avg) < 4 / (255 * 12.92):
+                    avg = (0.0, 0.0, 0.0)
+                rows[oy][ox] = avg
+    return rows
+
+
+def convert_pictoric(src_lin, progress=False, allow_inverse_attr=True):
+    width, height = HIRES_WIDTH_PX, HIRES_ROWS
+    num_blocks = width // 6
 
     ostro = _pictoric_build_ostro_table()
     palette = _PICTORIC_PALETTE
@@ -1040,6 +1107,34 @@ def convert_pictoric(img, progress=False, allow_inverse_attr=True):
         row_pixels = src_lin[y]
         line_cache = {}
         block_cache = {}
+
+        # Trailing letterbox-padding blocks (source pixels exactly (0,0,0)
+        # -- deterministic, never occurs by chance in real dithered photo
+        # content) are special-cased OUTSIDE the recursive search entirely.
+        # Confirmed via a real bug: the search's own myopic per-block cost
+        # model (same root cause as the "inverse attribute" streak finding
+        # above, but via a plain DIRECT attribute change this time, so
+        # --no-inverse-attr can't catch it) can lock onto a colour pair
+        # that's a good match for real content just before the padding
+        # starts, then let it persist unchanged straight into the padding
+        # -- e.g. {ink=red, paper=white} is a fine match for bright/warm
+        # content, but red is numerically CLOSER to black than white is,
+        # so black padding dithers as solid red instead of black. Verified
+        # concretely against the real upstream tool's own output on the
+        # same source image (see docs/pictconv.md) -- the reference
+        # renders this same padding as clean black. Bypassing the search
+        # for genuinely-known-black padding sidesteps the whole class of
+        # "committed to a bad long-term colour" issue for this one
+        # deterministic case, without touching the algorithm's behaviour
+        # on any real image content.
+        effective_num_blocks = num_blocks
+        while effective_num_blocks > 0:
+            base = (effective_num_blocks - 1) * 6
+            if all(row_pixels[base + i] == (0.0, 0.0, 0.0) for i in range(6)):
+                effective_num_blocks -= 1
+            else:
+                break
+        trailing_pad_blocks = num_blocks - effective_num_blocks
 
         def calc_err(x0, fg_idx, bg_idx, row_pixels=row_pixels, err1=err1, line_cache=line_cache):
             key = (x0, fg_idx, bg_idx) if fg_idx <= bg_idx else (x0, bg_idx, fg_idx)
@@ -1067,8 +1162,8 @@ def convert_pictoric(img, progress=False, allow_inverse_attr=True):
             line_cache[key] = total
             return total
 
-        def find_rec(x, ink, pap, block_cache=block_cache):
-            if x >= num_blocks:
+        def find_rec(x, ink, pap, block_cache=block_cache, effective_num_blocks=effective_num_blocks):
+            if x >= effective_num_blocks:
                 return 0.0, 64
             key = (x, ink, pap)
             cached = block_cache.get(key)
@@ -1116,7 +1211,7 @@ def convert_pictoric(img, progress=False, allow_inverse_attr=True):
         # hits from find_rec's own recursive exploration, not fresh work).
         blocks = [None] * num_blocks
         ink, pap = DEFAULT_INK, DEFAULT_PAPER
-        for x0 in range(num_blocks):
+        for x0 in range(effective_num_blocks):
             _t, c = find_rec(x0, ink, pap)
             inverse = c >= 128
             cc = c - 128 if inverse else c
@@ -1133,6 +1228,24 @@ def convert_pictoric(img, progress=False, allow_inverse_attr=True):
                 bg = fg
                 raw_cmd = cc + (128 if inverse else 0)
             blocks[x0] = {"fg": fg, "bg": bg, "cmd": raw_cmd}
+
+        if trailing_pad_blocks > 0:
+            # Force PAPER (not "fg"/"bg" generically -- the two are not
+            # interchangeable: a pixel-data block's bit=1 always means
+            # "show ink", regardless of which local role variable happens
+            # to hold black) to black, inserting one paper-change
+            # attribute byte if it isn't already. The remaining padding
+            # blocks then need no further attribute change: with paper
+            # guaranteed black, the ordinary per-pixel distance compare
+            # naturally prefers paper (bit=0) for genuinely (0,0,0)
+            # source content, whatever ink happens to be.
+            first = effective_num_blocks
+            if pap != 0:
+                blocks[first] = {"fg": ink, "bg": 0, "cmd": 16}
+                pap = 0
+                first += 1
+            for x0 in range(first, num_blocks):
+                blocks[x0] = {"fg": ink, "bg": pap, "cmd": 64}
 
         # Real per-pixel serpentine dithering pass over the row, now that
         # every block's (fg, bg) pair is fixed.
@@ -1249,22 +1362,26 @@ def main():
               f"(HIRES resolution) in this version", file=sys.stderr)
         return 1
 
-    img = load_and_fit(args.input, args.width, args.height)
-
-    if args.mode == "mono":
-        data = convert_mono(img, args.ink, args.paper, args.dither)
-    elif args.mode == "colored":
-        data = convert_colored(img, args.dither)
-    elif args.mode == "aic":
-        data = convert_aic(img, args.aic_ink0, args.aic_paper0, args.aic_ink1, args.aic_paper1, args.dither)
-    elif args.mode == "samhocevar":
-        data = convert_samhocevar(img, depth=args.samhocevar_depth, progress=True,
-                                   allow_inverse_attr=not args.no_inverse_attr)
-    elif args.mode == "pictoric":
-        data = convert_pictoric(img, progress=True, allow_inverse_attr=not args.no_inverse_attr)
+    if args.mode == "pictoric":
+        # Own loader: linear-light box-filter resize, matching upstream --
+        # NOT this project's shared load_and_fit(), see that function's
+        # own docstring for why.
+        src_lin = load_and_fit_linear(args.input, args.width, args.height)
+        data = convert_pictoric(src_lin, progress=True, allow_inverse_attr=not args.no_inverse_attr)
     else:
-        print(f"ERROR: --mode {args.mode} not implemented yet", file=sys.stderr)
-        return 1
+        img = load_and_fit(args.input, args.width, args.height)
+        if args.mode == "mono":
+            data = convert_mono(img, args.ink, args.paper, args.dither)
+        elif args.mode == "colored":
+            data = convert_colored(img, args.dither)
+        elif args.mode == "aic":
+            data = convert_aic(img, args.aic_ink0, args.aic_paper0, args.aic_ink1, args.aic_paper1, args.dither)
+        elif args.mode == "samhocevar":
+            data = convert_samhocevar(img, depth=args.samhocevar_depth, progress=True,
+                                       allow_inverse_attr=not args.no_inverse_attr)
+        else:
+            print(f"ERROR: --mode {args.mode} not implemented yet", file=sys.stderr)
+            return 1
 
     if args.format == "bin":
         write_bin(data, args.output)
