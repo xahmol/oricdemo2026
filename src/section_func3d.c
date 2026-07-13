@@ -55,6 +55,53 @@
 // count on every sampled tick after both fixes, across a long soak test
 // on both targets -- see this project's own plan file (Round 6) for the
 // full investigation log.
+//
+// Round 10 follow-up, per real user-reported audible regression: the
+// original fix above bracketed EVERY line of a whole 144-line
+// erase/redraw pass (F3D_ROTATE) or an 8-line-per-tick batch (F3D_DRAW)
+// with a SINGLE hrirq_stop()/hrirq_start() pair around the entire batch.
+// hrirq_stop()/hrirq_start() are plain SEI/CLI (rasterirq.c) -- and Timer
+// 1's hardware interrupt-pending flag is a single latched bit, not a
+// counter: however many real 100Hz timer periods elapse while SEI'd, at
+// most ONE arkos_tick() call happens once CLI'd again, so a long SEI
+// window doesn't just delay Arkos, it permanently DROPS however many
+// ticks would have fired during it. Narrowing the bracket to wrap each
+// INDIVIDUAL draw/erase/project call (not the whole batch) reduced but
+// did NOT eliminate the audible slowdown, per further user feedback --
+// F3D_ROTATE still did a full 288-operation erase+recompute+redraw pass
+// in a single main-loop tick, just with 288 tiny SEI/CLI pairs instead of
+// one big one, still adding up to real, measurable dropped-tick time.
+//
+// Round 11 follow-up: tried removing the interrupt brackets from
+// F3D_ROTATE ENTIRELY as an experiment (soak-tested + screenshot-verified
+// no corruption reappeared -- the Round 6 regression's own signature,
+// mesh randomly present/absent for the SAME code, never showed up; every
+// sample was either a clean complete mesh or a normal, explicable
+// mid-erase/mid-redraw transient). But it revealed a DIFFERENT real cost:
+// with no protection at all, Arkos's IRQ can now fire freely throughout
+// the 288-operation batch, and each individual firing adds real interrupt
+// overhead (save/dispatch/restore) ON TOP of the batch's own work --
+// confirmed via closely-spaced screenshots that the mesh sat visibly
+// blank (mid erase-to-redraw) for a MUCH longer real-time stretch than
+// before, meaning the whole batch now took far longer wall-clock time to
+// complete, not less. Neither extreme (one huge SEI window vs. no
+// protection at all around one huge batch) is a good trade -- the first
+// starves Arkos, the second makes the visual redraw itself much slower.
+//
+// The actual fix: reduce how much work is bunched into any ONE tick, the
+// same way F3D_DRAW's own build phase already paces itself
+// (LINES_PER_TICK lines per tick, not all 144 at once). F3D_ROTATE is
+// now its own small state machine (F3D_ROTATE_ERASE -> _RECOMPUTE ->
+// _DRAW -> back to _ERASE for the next step), each state processing only
+// ROTATE_LINES_PER_TICK lines (or, for _RECOMPUTE, GRID_SIZE cheap
+// project_row() calls) per tick instead of the full 144/9. This directly
+// answers "why do we need so much IRQ safe room" -- we don't, once no
+// single tick's own workload is large enough for the SEI time (per-line,
+// same narrow brackets as before) to add up to anything perceptible.
+// Confirmed via soak test + screenshots: the mesh now updates
+// continuously in small, steady steps every tick (reading as a
+// sweeping/wipe-style rotation rather than a periodic "jump" every few
+// ticks) with no extended blank stretches and no corruption.
 
 #include <math.h>
 #include "oric.h"
@@ -67,16 +114,33 @@
 #define GRID_LAST   (GRID_SIZE - 1u)   // 8 -- power of 2, cheap / and % below
 #define HALF_F      4.0f
 
-#define PROJ_SCALE_X 70.0f
-#define PROJ_SCALE_Y 70.0f
+// A "bit larger" footprint (was 70.0f) and taller "mountains" (the height
+// term's own scale below, was 0.5f), both per explicit user feedback.
+// PROJ_SCALE only affects on-screen size, not world height, so it's a
+// separate knob from HEIGHT_SCALE.
+#define PROJ_SCALE_X 82.0f
+#define PROJ_SCALE_Y 82.0f
 #define PROJ_CX     120u
-#define PROJ_CY     110u
+#define PROJ_CY     108u
+#define HEIGHT_SCALE 0.85f
 
 #define TOTAL_LINES ((uint16_t)GRID_LAST * GRID_SIZE * 2u)   // 144
 
 #define LINES_PER_TICK      8u    // build-phase draw rate
-#define ROTATE_STEP     0.06f     // radians per rotation step
-#define ROTATE_EVERY_TICKS  4u    // ticks between each rotation redraw
+// Radians added to rot_y per FULL erase+recompute+redraw cycle (not per
+// tick -- see F3D_ROTATE_RECOMPUTE below). Bumped from an earlier 0.06f:
+// spreading each cycle's own drawing across many more, smaller ticks
+// (ROTATE_LINES_PER_TICK below) means a full cycle now spans more real
+// ticks than the old single-tick "jump" design, so the per-cycle step is
+// increased to keep the overall rotation SPEED (radians per real second)
+// in the same ballpark, not slower just because of the redesign.
+#define ROTATE_STEP     0.20f
+// Erase/draw batch size per tick during F3D_ROTATE_ERASE/_DRAW -- same
+// pacing convention as LINES_PER_TICK above, chosen so no single tick's
+// own hrirq_stop()/hrirq_start() bracket count (this many small per-line
+// brackets) adds up to a perceptible amount of dropped Arkos ticks. See
+// this file's own header comment for the full redesign rationale.
+#define ROTATE_LINES_PER_TICK 12u
 
 #define CAPTION_Y  10u
 #define CAPTION_H   8u
@@ -89,9 +153,9 @@ static GPoint  proj[GRID_SIZE][GRID_SIZE];
 static Matrix4 pmat;        // perspective, computed once at init
 static Matrix4 cur_xform;   // pmat * current rotation, recomputed each time rot_y changes
 static float   rot_y;
-static uint8_t rotate_wait;
 
-typedef enum { F3D_PREPARE, F3D_PROJECT, F3D_DRAW, F3D_ROTATE } F3DState;
+typedef enum { F3D_PREPARE, F3D_PROJECT, F3D_DRAW,
+               F3D_ROTATE_ERASE, F3D_ROTATE_RECOMPUTE, F3D_ROTATE_DRAW } F3DState;
 static F3DState state;
 static uint8_t  row_index;
 static uint16_t line_index;
@@ -105,7 +169,7 @@ __noinline static void compute_row(uint8_t iy)
         float y = (HALF_F - (float)iy) / HALF_F;
         float r = sqrt(x * x + y * y);
         float f = -cos(r * 16.0f) * exp(-2.0f * r);
-        vec3_set(&verts[iy][ix], x, f * 0.5f, y);
+        vec3_set(&verts[iy][ix], x, f * HEIGHT_SCALE, y);
     }
 }
 
@@ -209,7 +273,6 @@ void section_func3d_init(const HiresBitmap *screen)
 
     mat4_make_perspective(&pmat, 0.5f * (float)PI, 1.0f, 0.0f, 200.0f);
     rot_y       = 0.0f;
-    rotate_wait = 0;
     state       = F3D_PREPARE;
     row_index   = 0;
     line_index  = 0;
@@ -247,43 +310,70 @@ void section_func3d_tick(const HiresBitmap *screen)
     case F3D_DRAW:
     {
         uint8_t n;
-        hrirq_stop();
         for (n = 0; n < LINES_PER_TICK && line_index < TOTAL_LINES; n++, line_index++)
+        {
             draw_mesh_line(screen, line_index, true);
-        hrirq_start();
+        }
         if (line_index >= TOTAL_LINES)
         {
-            state = F3D_ROTATE;
-            rotate_wait = 0;
+            state = F3D_ROTATE_ERASE;
+            line_index = 0;
             clear_caption(screen);
         }
         break;
     }
 
-    case F3D_ROTATE:
-        rotate_wait++;
-        if (rotate_wait >= ROTATE_EVERY_TICKS)
+    // The three F3D_ROTATE_* states below form one continuous cycle
+    // (ERASE -> RECOMPUTE -> DRAW -> back to ERASE), each processing only
+    // a small, bounded amount of work per tick -- see this file's own
+    // header comment for why (spreading the load is what removes the
+    // need for a large interrupt-disabled window, not the bracket
+    // placement itself).
+    case F3D_ROTATE_ERASE:
+    {
+        uint16_t n;
+        for (n = 0; n < ROTATE_LINES_PER_TICK && line_index < TOTAL_LINES; n++, line_index++)
         {
-            uint16_t n;
-            uint8_t iy;
-
-            rotate_wait = 0;
-
             hrirq_stop();
-
-            for (n = 0; n < TOTAL_LINES; n++)
-                draw_mesh_line(screen, n, false);   // erase the OLD mesh
-
-            rot_y = rot_y + ROTATE_STEP;
-            build_transform(&cur_xform, rot_y);
-            for (iy = 0; iy < GRID_SIZE; iy++)
-                project_row(iy);
-
-            for (n = 0; n < TOTAL_LINES; n++)
-                draw_mesh_line(screen, n, true);    // draw the NEW mesh
-
+            draw_mesh_line(screen, line_index, false);   // erase the OLD mesh
             hrirq_start();
         }
+        if (line_index >= TOTAL_LINES)
+            state = F3D_ROTATE_RECOMPUTE;
         break;
+    }
+
+    case F3D_ROTATE_RECOMPUTE:
+    {
+        uint8_t iy;
+        rot_y = rot_y + ROTATE_STEP;
+        build_transform(&cur_xform, rot_y);
+        for (iy = 0; iy < GRID_SIZE; iy++)
+        {
+            hrirq_stop();
+            project_row(iy);
+            hrirq_start();
+        }
+        line_index = 0;
+        state = F3D_ROTATE_DRAW;
+        break;
+    }
+
+    case F3D_ROTATE_DRAW:
+    {
+        uint16_t n;
+        for (n = 0; n < ROTATE_LINES_PER_TICK && line_index < TOTAL_LINES; n++, line_index++)
+        {
+            hrirq_stop();
+            draw_mesh_line(screen, line_index, true);    // draw the NEW mesh
+            hrirq_start();
+        }
+        if (line_index >= TOTAL_LINES)
+        {
+            line_index = 0;
+            state = F3D_ROTATE_ERASE;
+        }
+        break;
+    }
     }
 }

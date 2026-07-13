@@ -38,6 +38,14 @@ static ArkosChannel arkos_chan[3];
 static uint16_t arkos_linker_ptr;
 static uint16_t arkos_pattern_counter;
 static bool     arkos_loaded;
+// Set by arkos_advance_pattern()'s own "end of song" branch (dur==0, the
+// Linker wrapping back to its own loop point) whenever the currently
+// loaded module completes a full playthrough -- read-and-cleared by
+// arkos_song_finished() below. A plain bool, not double-buffered/atomic:
+// written only from arkos_tick()'s own __interrupt context, read only
+// from main-line polling code, a single-byte flag on a 6502 needs no
+// extra synchronization for this "did it happen at least once" use case.
+static bool     arkos_song_looped;
 
 // Shared PSG registers that persist across ticks until a RegisterBlock
 // frame explicitly updates them (mirrors akyplayer.s's own
@@ -483,6 +491,7 @@ static void arkos_advance_pattern(void)
         uint16_t loop_addr = arkos_peek16((uint16_t)(arkos_linker_ptr + 2));
         arkos_linker_ptr = loop_addr;
         dur = arkos_peek16(arkos_linker_ptr);
+        arkos_song_looped = true;
     }
     arkos_pattern_counter = dur;
     arkos_chan[0].track_ptr = arkos_peek16((uint16_t)(arkos_linker_ptr + 2));
@@ -598,6 +607,7 @@ void arkos_init(void)
     // that bug entirely rather than chasing it further.
     arkos_linker_ptr = (uint16_t)(ARKOS_MODULE + 6);
     arkos_pattern_counter = 1; // forces an immediate pattern-load on tick 1
+    arkos_song_looped = false;
 
     for (i = 0; i < 3; i++)
     {
@@ -791,5 +801,12 @@ void arkos_resume(void)
 const uint8_t *arkos_debug_shadow(void)
 {
     return arkos_ay_shadow;
+}
+
+bool arkos_song_finished(void)
+{
+    bool result = arkos_song_looped;
+    arkos_song_looped = false;
+    return result;
 }
 

@@ -30,7 +30,6 @@
 #include "hires.h"
 #include "picture.h"
 #include "scroller.h"
-#include "handwriting_font.h"
 #include "section_scroll_showcase.h"
 
 #ifdef STORAGE_FLOPPY
@@ -39,8 +38,26 @@
 #define ORICATMOS_FILE "oricatmos.bin"
 #endif
 
-#define TAGLINE_Y 170u
+// TAGLINE_Y/SCROLLER_PLAIN: the scroller used to sit at y=170 with
+// SCROLLER_BOUNCE (a +/-6px vertical wobble), which put it squarely
+// inside the keyboard illustration's own real pixel content (y=160-185)
+// -- since scroller.c's own erase step just blanks pixels rather than
+// restoring whatever picture content was there, the keyboard artwork was
+// being permanently destroyed (turned blank) as the caption scrolled
+// across it, and never redrawn. Real bug, found via a direct byte-level
+// scan of assets/oricatmos.bin confirming non-blank content at every
+// sampled row in that range. The picture's own genuinely blank margin at
+// the BOTTOM is y=187-199 -- moved the tagline there instead (y=191,
+// SCROLLER_GLYPH_H=8 tall, so it occupies 191-198) and dropped the
+// bounce style (no headroom in a 13-row margin for +/-6px of wobble on
+// top of an 8px glyph). CAPTION_BAND_* below is also cleared explicitly
+// on top of that -- belt and braces, not just relying on the picture's
+// own margin happening to already be blank.
+#define TAGLINE_Y 191u
 #define TAGLINE   "Oric Atmos -- 8-bit dreams since 1983...."
+
+#define CAPTION_BAND_Y0 188u
+#define CAPTION_BAND_Y1 199u
 
 #define KB_Y0            160u
 #define KB_Y1            185u
@@ -59,12 +76,22 @@ static void colour_keyboard_accents(void)
     }
 }
 
+static void clear_caption_band(const HiresBitmap *screen)
+{
+    uint8_t y;
+    hb_rect_fill(screen, (const HiresClip *)0, 0, CAPTION_BAND_Y0, HIRES_WIDTH_PX,
+                 (uint8_t)(CAPTION_BAND_Y1 - CAPTION_BAND_Y0 + 1), false);
+    for (y = CAPTION_BAND_Y0; y <= CAPTION_BAND_Y1; y++)
+        hires_row_colors(y, A_FWWHITE, A_BGBLACK);
+}
+
 void section_scroll_showcase_init(const HiresBitmap *screen)
 {
     picture_load(ORICATMOS_FILE, (void *)HIRESVRAM, 8000);
     colour_keyboard_accents();
+    clear_caption_band(screen);
 
-    scroller_init(screen, &handwriting_font, TAGLINE, TAGLINE_Y, SCROLLER_BOUNCE);
+    scroller_init(screen, TAGLINE, TAGLINE_Y, SCROLLER_PLAIN);
 }
 
 // void, not bool -- see section_common.h's own header comment for why.
@@ -74,5 +101,5 @@ void section_scroll_showcase_init(const HiresBitmap *screen)
 void section_scroll_showcase_tick(const HiresBitmap *screen)
 {
     if (scroller_tick(screen))
-        scroller_init(screen, &handwriting_font, TAGLINE, TAGLINE_Y, SCROLLER_BOUNCE);
+        scroller_init(screen, TAGLINE, TAGLINE_Y, SCROLLER_PLAIN);
 }

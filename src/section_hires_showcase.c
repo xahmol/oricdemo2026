@@ -14,26 +14,19 @@
 //     specifically (paint-bucket filling a bounded blank region), not
 //     just another filled shape.
 //
-// Also lands the demo's music-track switch: assets/steppingout.aky (used
-// by sections 1-3) hands off to assets/boulesetbits.aky here, the first
-// section past the split point (see main.c's own "Two music tracks"
-// comment for the bracketing rationale -- arkos_stop()/arkos_load()/
-// arkos_init(), NOT arkos_pause()/arkos_resume(), since restarting from
-// the beginning is exactly the intent for a genuine track change, unlike
-// section_logo.c's picture_load() which needs the CURRENT track to keep
-// playing through an unrelated asset load).
+// Used to hand off the demo's music track here (a ONE-TIME hardcoded
+// switch to assets/boulesetbits.aky, the first section past the original
+// "two tracks split at section 4" design). Superseded by a general,
+// completion-driven toggle in main.c (music_check_toggle(), which
+// alternates tracks whenever the currently playing one finishes a full
+// playthrough via arkos_song_finished() -- see arkos.c's own "end of
+// song" detection) that now runs for the WHOLE demo, not just from this
+// section onward -- per user feedback asking for exactly that behaviour.
+// This section no longer touches music at all.
 
 #include "oric.h"
 #include "hires.h"
-#include "arkos.h"
-#include "rasterirq.h"
 #include "section_hires_showcase.h"
-
-#ifdef STORAGE_FLOPPY
-#define MUSIC_FILE2 3
-#else
-#define MUSIC_FILE2 "boulesetbits.aky"
-#endif
 
 // Ticks to hold each shape before the next one appears (~15 * ~74ms
 // =~ 1.1s -- long enough to register each shape individually, not so
@@ -77,18 +70,6 @@ static uint16_t  wait_count;
 
 void section_hires_showcase_init(const HiresBitmap *screen)
 {
-    // The music-track switch -- see this file's own header comment for
-    // why this pair (arkos_stop()/arkos_load()/arkos_init()), not
-    // arkos_pause()/arkos_resume(), is the right one here. Bracketed with
-    // hrirq_stop()/hrirq_start() for the same reason picture_load() is:
-    // neither file_load() nor floppy_load() is safe to call while
-    // arkos_tick() is ticking live (see docs/arkos.md's "Pause vs. stop").
-    hrirq_stop();
-    arkos_stop();
-    if (arkos_load(MUSIC_FILE2))
-        arkos_init();
-    hrirq_start();
-
     hb_fill(screen, 0x40);   // real RAM isn't zero-initialized -- start blank
 
     hires_row_colors(0, A_FWWHITE, A_BGBLACK);   // whole-screen baseline

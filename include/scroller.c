@@ -1,5 +1,6 @@
 // scroller.c - see scroller.h.
 
+#include <string.h>
 #include "scroller.h"
 #include "fixedmath.h"
 #include "oric.h"
@@ -20,8 +21,8 @@
 #define BOUNCE_AMPLITUDE    6   // max +/- vertical offset in pixels (SCROLLER_BOUNCE)
 #define BOUNCE_ANGLE_STEP   4u  // oric_cos() angle units per tick -- controls bounce speed
 
-static const TtfFont *font;
 static const char    *text;
+static uint8_t        text_len;   // strlen(text), capped to uint8_t
 static ScrollerStyle  style;
 static uint8_t        base_y;
 static uint16_t       text_width;
@@ -31,14 +32,14 @@ static uint8_t        prev_x, prev_y;  // position of the LAST draw, for erasing
 static uint8_t        bounce_angle;
 static bool           has_prev;
 
-void scroller_init(const HiresBitmap *screen, const TtfFont *f, const char *s, uint8_t y, ScrollerStyle st)
+void scroller_init(const HiresBitmap *screen, const char *s, uint8_t y, ScrollerStyle st)
 {
     (void)screen;
-    font           = f;
     text           = s;
+    text_len       = (uint8_t)strlen(s);
     style          = st;
     base_y         = y;
-    text_width     = ttf_strlen(font, text);
+    text_width     = (uint16_t)text_len * SCROLLER_GLYPH_W;
     distance       = 0;
     total_distance = (uint16_t)(HIRES_WIDTH_PX + text_width);
     bounce_angle   = 0;
@@ -59,7 +60,7 @@ bool scroller_tick(const HiresBitmap *screen)
     // capped to 255 here (hb_rect_fill's own w parameter is uint8_t);
     // taglines/credits lines are expected to stay well under that.
     if (has_prev)
-        hb_rect_fill(screen, &clip, prev_x, prev_y, (uint8_t)text_width, font->h, false);
+        hb_rect_fill(screen, &clip, prev_x, prev_y, (uint8_t)text_width, SCROLLER_GLYPH_H, false);
 
     if (distance >= total_distance)
         return true;   // fully scrolled off the left edge
@@ -76,7 +77,7 @@ bool scroller_tick(const HiresBitmap *screen)
         new_y = base_y;
     }
 
-    ttf_print(screen, &clip, font, new_x, new_y, text);
+    hb_put_chars(screen, &clip, new_x, new_y, text, text_len);
 
     prev_x   = new_x;
     prev_y   = new_y;

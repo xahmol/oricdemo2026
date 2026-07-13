@@ -127,6 +127,17 @@ void arkos_resume(void);
 // code.
 const uint8_t *arkos_debug_shadow(void);
 
+// Returns true the first time this is called since the currently loaded
+// module completed a full playthrough and looped back to its own start
+// (the Linker position wrapping via its own loop-point pointer -- see
+// arkos_advance_pattern()'s "end of song" branch in arkos.c) -- cleared
+// back to false as soon as it's read, so poll this once per main-loop
+// iteration rather than assuming it stays true. Intended use: switching
+// to a different module once the current one finishes, so a long-running
+// demo doesn't loop the exact same tune forever (see main.c's own
+// music_check_toggle()). Always false before arkos_init() is ever called.
+bool arkos_song_finished(void);
+
 #pragma compile("arkos.c")
 
 #endif // ARKOS_H

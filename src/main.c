@@ -51,10 +51,39 @@
 //     tools/floppy/disk_script.txt), loaded straight into that target's
 //     already-plain RAM at the same $C000 address.
 #ifdef STORAGE_FLOPPY
-#define MUSIC_FILE 1
+#define MUSIC_FILE  1
+#define MUSIC_FILE2 3
 #else
-#define MUSIC_FILE "steppingout.aky"
+#define MUSIC_FILE  "steppingout.aky"
+#define MUSIC_FILE2 "boulesetbits.aky"
 #endif
+
+// Alternates between the demo's two music tracks once the currently
+// playing one finishes a full playthrough (arkos_song_finished(), see
+// arkos.c's own "end of song" detection in arkos_advance_pattern()) --
+// keeps a long-running demo from looping the exact same tune forever
+// instead of only ever playing assets/steppingout.aky. Replaces an
+// earlier design (a ONE-TIME hardcoded switch to boulesetbits.aky at the
+// section_hires_showcase.c boundary) with a general, completion-driven
+// toggle that runs for the whole demo -- see that file's own header
+// comment for the full history. Same hrirq_stop()/arkos_stop()/
+// arkos_load()/arkos_init()/hrirq_start() bracket as any other genuine
+// track restart (NOT arkos_pause()/arkos_resume(), which is for a brief
+// same-track pause only -- see docs/arkos.md's "Pause vs. stop" section).
+static uint8_t current_track;   // 1 or 2, mirrors which of the two files above is loaded
+
+static void music_check_toggle(void)
+{
+    if (arkos_song_finished())
+    {
+        hrirq_stop();
+        arkos_stop();
+        current_track = (current_track == 1) ? 2 : 1;
+        if (arkos_load(current_track == 1 ? MUSIC_FILE : MUSIC_FILE2))
+            arkos_init();
+        hrirq_start();
+    }
+}
 
 // Real frame-pacing for the master loop below, replacing what used to be
 // an uncontrolled busy-loop (each section's own tick function ran back to
@@ -167,6 +196,8 @@ static void run_section(const DemoSection *section, const HiresBitmap *screen)
         while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
             ;
 
+        music_check_toggle();
+
         elapsed++;
         if (section_finished_flag)
             return;
@@ -246,6 +277,7 @@ static void transition_clear(const HiresBitmap *screen)
         transition_clear_band(screen->data, col);
         while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
             ;
+        music_check_toggle();
     }
 
     // A plain loop, not dissolve.h's hires_row_colors_range() -- pulling in
@@ -303,7 +335,18 @@ static void bird_scene_tick(const HiresBitmap *screen)
 // section like any other (it used to run outside the sections[] table,
 // before hires_on() -- see git history -- back when it was TEXT-mode
 // content; moving it to HIRES mode removed that whole special case).
-#define SPLASH_MIN_TICKS 20u
+//
+// EVERY *_MIN_TICKS constant in this file was trimmed from an original
+// 20 (~1.2s at MAIN_FRAME_PACING_TICKS=3's ~60ms/iteration) down to 6
+// (~0.36s), per user feedback that keypresses felt "very sluggish" to
+// register -- 20 ticks was a genuinely long, deliberate dead zone before
+// ANY keypress was even checked (see run_section()'s own
+// `elapsed >= section->min_ticks` gate below), on EVERY section, which
+// adds up across a demo with this many sections. 6 ticks still leaves
+// enough of a grace window that a keypress can't insta-skip a section
+// before anything has rendered, without the long, very-noticeable stall
+// the old value produced.
+#define SPLASH_MIN_TICKS 6u
 #define SPLASH_MAX_TICKS 500u
 
 // HIRES Oric logo + circling raster bars: circles indefinitely (its own
@@ -312,53 +355,57 @@ static void bird_scene_tick(const HiresBitmap *screen)
 // impatient keypress from insta-skipping before the bar has completed even
 // one pass, max_ticks (~22s) gives a reasonable amount of time to watch
 // the circling effect before moving on regardless.
-#define LOGO_MIN_TICKS 20u
+#define LOGO_MIN_TICKS 6u
 #define LOGO_MAX_TICKS 300u
 
 // Bird scene: now that section #4 exists to advance into, gets real
-// pacing instead of SECTION_FOREVER -- ~30s is enough to enjoy the
-// animation before moving on.
-#define BIRD_MIN_TICKS  20u
-#define BIRD_MAX_TICKS 400u
+// pacing instead of SECTION_FOREVER. Trimmed from an original ~30s
+// (400 ticks) per user feedback that the overall demo ran too long.
+#define BIRD_MIN_TICKS  6u
+#define BIRD_MAX_TICKS 250u
 
 // HIRES shapes showcase: its own tick() never calls section_mark_finished()
 // (the 4 shapes finish building after ~60 ticks, then it just holds the
-// completed picture) -- max_ticks (~11s) leaves a good stretch of hold
-// time after that before moving on regardless.
-#define HIRES_SHOWCASE_MIN_TICKS  20u
-#define HIRES_SHOWCASE_MAX_TICKS 150u
+// completed picture) -- max_ticks leaves a good stretch of hold time after
+// that before moving on regardless. Trimmed slightly per user feedback
+// that the overall demo ran too long.
+#define HIRES_SHOWCASE_MIN_TICKS  6u
+#define HIRES_SHOWCASE_MAX_TICKS 120u
 
 // Polygon workout: circles indefinitely (its own tick() never calls
 // section_mark_finished(), see section_polygon_workout.c), so
-// min_ticks/max_ticks are the only thing pacing it -- same ~22s hold as
-// section_logo.c's own raster bars.
-#define POLYGON_WORKOUT_MIN_TICKS  20u
-#define POLYGON_WORKOUT_MAX_TICKS 300u
+// min_ticks/max_ticks are the only thing pacing it. Cut roughly in half
+// from an original ~22s (300 ticks) per explicit user feedback ("shorten
+// the rotating star a bit") -- a bigger trim than the other showcase
+// sections below.
+#define POLYGON_WORKOUT_MIN_TICKS  6u
+#define POLYGON_WORKOUT_MAX_TICKS 150u
 
 // 3D function surface: builds up over ~(9+9+18)=36 ticks (prepare/project/
 // draw phases), then rotates for the remainder -- no natural end, so
-// min_ticks/max_ticks pace the whole section, same ~22s hold as the other
-// two HIRES-shape sections above.
-#define FUNC3D_MIN_TICKS  20u
-#define FUNC3D_MAX_TICKS 300u
+// min_ticks/max_ticks pace the whole section. Trimmed per user feedback
+// that the overall demo ran too long.
+#define FUNC3D_MIN_TICKS  6u
+#define FUNC3D_MAX_TICKS 200u
 
 // Sprite showcase: a satellite drifts indefinitely across the starfield
 // (its own tick() never calls section_mark_finished()), so min_ticks/
-// max_ticks pace it, same ~22s hold as the other showcase sections.
-#define SPRITE_SHOWCASE_MIN_TICKS  20u
-#define SPRITE_SHOWCASE_MAX_TICKS 300u
+// max_ticks pace it. Trimmed per user feedback that the overall demo ran
+// too long.
+#define SPRITE_SHOWCASE_MIN_TICKS  6u
+#define SPRITE_SHOWCASE_MAX_TICKS 200u
 
 // Scroll showcase: loops its own tagline scroll indefinitely (its own
-// tick() never calls section_mark_finished()), same ~22s hold as the
-// other showcase sections.
-#define SCROLL_SHOWCASE_MIN_TICKS  20u
-#define SCROLL_SHOWCASE_MAX_TICKS 300u
+// tick() never calls section_mark_finished()). Trimmed per user feedback
+// that the overall demo ran too long.
+#define SCROLL_SHOWCASE_MIN_TICKS  6u
+#define SCROLL_SHOWCASE_MAX_TICKS 200u
 
 // Wave showcase: waves the magazine-photo picture indefinitely (its own
-// tick() never calls section_mark_finished()), same ~22s hold as the
-// other showcase sections.
-#define WAVE_SHOWCASE_MIN_TICKS  20u
-#define WAVE_SHOWCASE_MAX_TICKS 300u
+// tick() never calls section_mark_finished()). Trimmed per user feedback
+// that the overall demo ran too long.
+#define WAVE_SHOWCASE_MIN_TICKS  6u
+#define WAVE_SHOWCASE_MAX_TICKS 200u
 
 // Dissolve showcase: has a real natural end (its own tick() calls
 // section_mark_finished() once the reveal completes, see
@@ -370,10 +417,10 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define DISSOLVE_SHOWCASE_MAX_TICKS 300u
 
 // Macaw showcase: loops its own caption scroll indefinitely (its own
-// tick() never calls section_mark_finished()), same ~22s hold as the
-// other showcase sections.
-#define MACAW_SHOWCASE_MIN_TICKS  20u
-#define MACAW_SHOWCASE_MAX_TICKS 300u
+// tick() never calls section_mark_finished()). Trimmed per user feedback
+// that the overall demo ran too long.
+#define MACAW_SHOWCASE_MIN_TICKS  6u
+#define MACAW_SHOWCASE_MAX_TICKS 200u
 
 // The demo's own running order -- currently the idi8b splash, the Oric
 // logo/raster-bar intro, the bird scene, and the HIRES shapes showcase;
@@ -418,6 +465,7 @@ int main(void)
     // interrupts get enabled even in the no-music case now. arkos_tick
     // itself is still only registered when arkos_load() actually succeeds.
     hrirq_init();
+    current_track = 1;
     if (arkos_load(MUSIC_FILE))
     {
         arkos_init();
