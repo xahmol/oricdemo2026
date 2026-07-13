@@ -276,7 +276,7 @@ static const unsigned char handwriting_font_char_defs[3978] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-const TtfFont handwriting_font = {
+static const TtfFont handwriting_font = {
     15, 26,
     32, 126,
     handwriting_font_widths, handwriting_font_width_bytes, handwriting_font_offsets, handwriting_font_char_defs

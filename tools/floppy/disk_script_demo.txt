@@ -57,3 +57,18 @@ AddDefine LOADER_MUSIC2_FILE {FileIndex}
 ; (STORAGE_FLOPPY) -- see src/section_sprite_showcase.c's STARFIELD_FILE.
 AddFile {STARFIELD_BIN}
 AddDefine LOADER_STARFIELD_FILE {FileIndex}
+
+; File index 5: assets/oricatmos.bin, loaded via picture_load(5)
+; (STORAGE_FLOPPY) -- see src/section_scroll_showcase.c's ORICATMOS_FILE.
+AddFile {ORICATMOS_BIN}
+AddDefine LOADER_ORICATMOS_FILE {FileIndex}
+
+; File index 6: assets/oricmag.bin, loaded via picture_load(6)
+; (STORAGE_FLOPPY) -- see src/section_wave_showcase.c's ORICMAG_FILE.
+AddFile {ORICMAG_BIN}
+AddDefine LOADER_ORICMAG_FILE {FileIndex}
+
+; File index 7: assets/macaw.bin, loaded via picture_load(7)
+; (STORAGE_FLOPPY) -- see src/section_macaw_showcase.c's MACAW_FILE.
+AddFile {MACAW_BIN}
+AddDefine LOADER_MACAW_FILE {FileIndex}
