@@ -1,126 +1,89 @@
 // section_dissolve_showcase.c - see section_dissolve_showcase.h.
 //
-// Deliberately does NOT #include "dissolve.h": pulling include/dissolve.c
-// into this program once already caused a real, confirmed regression --
-// see src/main.c's own transition_clear() comment for the full account
-// (a real Phosphoric/Oricutron soak test showed Oscar64's -O2 whole-
-// program register allocator pushing arkos_tick(), a real __interrupt
-// handler, right up against Oscar64's own documented interrupt-complexity
-// limit once dissolve.c's compilation unit was linked in, silently
-// corrupting Arkos playback rather than hard-erroring). The program has
-// only grown since that fix (four more sections), so the risk is not
-// smaller today -- both dissolve.h techniques are reimplemented locally
-// here instead, using only primitives ALREADY linked into every build
-// (hires_row_colors(), hb_put()):
+// Round 12 redesign, per explicit user feedback: the original version
+// (a stride-strobed attribute fade then an LFSR pixel reveal, both
+// reimplemented locally from include/dissolve.h -- see git history)
+// never actually showed a transition BETWEEN the two real pictures either
+// side of it. main.c's own main loop always runs transition_clear() (a
+// left-to-right wipe to a blank baseline) between EVERY section,
+// including right before this one's own init() -- so this section's
+// canvas started genuinely blank, not showing the wave-showcase photo,
+// and the LFSR phase only ever revealed random WHITE PIXELS on that
+// blank canvas, ending in a solid white screen with no picture content
+// at all. Visually correct per its own (as-built) design, but not a real
+// "dissolve LINK between the two pictures" -- per the user's own words,
+// "this only makes sense if it dissolves from something instead of only
+// dots."
 //
-//   1. A stride-strobed attribute fade (stride 8->4->2->1), matching
-//      hires_row_colors_range()'s own algorithm exactly, via a plain loop
-//      calling hires_row_colors() directly -- the same technique
-//      main.c's own transition_clear() already uses for the identical
-//      reason.
-//   2. A 16-bit Galois LFSR pixel reveal (polynomial 0xB400, the same one
-//      dissolve.c uses), driving hb_put() to progressively reveal a solid
-//      colour in pseudo-random pixel order.
+// Fixed by making this section genuinely self-contained rather than
+// relying on whatever transition_clear() happened to leave on screen:
+// it loads BOTH real pictures itself. init() loads assets/oricmag.bin
+// (the wave-showcase photo) as the starting frame; each tick() then
+// reveals MORE of assets/macaw.bin from the top down, by calling
+// picture_load() again with a GROWING max_size -- picture_load() (and
+// the file_load()/floppy_load() underneath it) only ever writes the
+// first `max_size` bytes of the destination, leaving whatever was
+// already there in the untouched tail (confirmed by reading picture.c
+// directly) -- so each step overwrites the top N rows with real macaw
+// pixel data while the wave photo's own bytes remain visible in the
+// rows not yet reached. This reads as a real top-down wipe from one
+// real picture into another, no random dots, and needs NO extra RAM
+// (no off-screen buffer for the incoming picture -- a full 8000-byte
+// buffer was never in this project's tight ~3-4KB remaining budget
+// anyway) and no new loader plumbing: it's the exact same picture_load()
+// every other section already uses, just called several times with an
+// increasing size instead of once with the full size.
 //
-// Both are safe to run here specifically BECAUSE the canvas is blank and
-// flat when this section's own init() runs: main.c's own transition_clear()
-// always wipes the previous section's content and resets to a plain
-// white-ink/black-paper baseline before ANY section's init() executes (see
-// main.c's own main loop). A stride-attribute-fade or per-pixel reveal
-// applied directly to one of this project's busy PHOTOGRAPHIC pictures
-// (real per-row attribute bytes scattered at many different columns, not
-// just a couple of fixed ink-bracket columns) would NOT be safe this way --
-// hires_row_colors() only ever touches column-bytes 0/1, so any OTHER
-// attribute byte later in that same row would immediately override it, and
-// hb_put() unconditionally treats its target as pixel data (sets bit6),
-// which would silently convert an existing ATTRIBUTE byte at that column
-// into pixel data, destroying whatever colour change it was making for the
-// rest of that row. Neither hazard applies to a canvas that's genuinely
-// blank going in.
+// NOT a true smooth crossfade (that would need a genuine per-pixel or
+// per-row RANDOM reveal order blending real bytes from both images,
+// which -- since file_load()/floppy_load() only support reading
+// sequentially from a file's own start, not an arbitrary offset --
+// would need a real off-screen staging buffer this project doesn't have
+// spare RAM for). A top-down wipe is the achievable middle ground: a
+// real picture-to-picture transition, at zero extra RAM cost.
 
 #include "oric.h"
 #include "hires.h"
+#include "picture.h"
 #include "section_dissolve_showcase.h"
 #include "section_common.h"
 
-// Phase 1: stride-strobed fade, from the blank white-ink/black-paper
-// baseline transition_clear() leaves behind, to a solid cyan-ink/blue-
-// paper backdrop for phase 2's own reveal.
-#define FADE_INK    A_FWCYAN
-#define FADE_PAPER  A_BGBLUE
-static const uint8_t fade_strides[] = { 8, 4, 2, 1 };
-#define NUM_FADE_STRIDES (sizeof(fade_strides) / sizeof(fade_strides[0]))
+#ifdef STORAGE_FLOPPY
+#define ORICMAG_FILE 6
+#define MACAW_FILE   7
+#else
+#define ORICMAG_FILE "oricmag.bin"
+#define MACAW_FILE   "macaw.bin"
+#endif
 
-static void apply_stride(uint8_t stride)
-{
-    uint8_t y;
-    for (y = 0; y < HIRES_ROWS; y = (uint8_t)(y + stride))
-        hires_row_colors(y, FADE_INK, FADE_PAPER);
-}
+// 10 rows/step (400 bytes) -- enough steps (20) for a visibly gradual
+// wipe without needing an excessive number of picture_load() calls (each
+// one re-reads the file from its own start, so total I/O across the
+// whole reveal grows with the NUMBER of steps, not just the final size).
+#define DISSOLVE_ROWS_PER_STEP 10u
+#define DISSOLVE_BYTES_PER_STEP ((uint16_t)DISSOLVE_ROWS_PER_STEP * HIRES_ROW_BYTES)
+#define DISSOLVE_TOTAL_STEPS (HIRES_ROWS / DISSOLVE_ROWS_PER_STEP)
 
-// Phase 2: LFSR pixel reveal -- same polynomial/algorithm as
-// include/dissolve.c's own hires_dissolve_init/next (see this file's own
-// header comment for why it's a local copy, not a call into that file).
-#define _DISSOLVE_PIXEL_COUNT ((uint16_t)((uint32_t)HIRES_WIDTH_PX * HIRES_ROWS))
-#define DISSOLVE_SEED         12345u
-#define PIXELS_PER_TICK       400u
-
-static uint16_t dissolve_lfsr;
-static uint16_t pixels_revealed;
-
-static uint16_t dissolve_next(void)
-{
-    uint16_t val;
-    do
-    {
-        uint16_t lsb = (uint16_t)(dissolve_lfsr & 1);
-        dissolve_lfsr = (uint16_t)(dissolve_lfsr >> 1);
-        if (lsb)
-            dissolve_lfsr = (uint16_t)(dissolve_lfsr ^ 0xB400);
-        val = dissolve_lfsr;
-    } while (val >= _DISSOLVE_PIXEL_COUNT);
-    return val;
-}
-
-typedef enum { STAGE_FADE, STAGE_REVEAL } DissolveStage;
-static DissolveStage stage;
-static uint8_t fade_step;
+static uint8_t dissolve_step;
 
 void section_dissolve_showcase_init(const HiresBitmap *screen)
 {
-    stage = STAGE_FADE;
-    fade_step = 0;
-    dissolve_lfsr = DISSOLVE_SEED;
-    pixels_revealed = 0;
+    (void)screen;
+    picture_load(ORICMAG_FILE, (void *)HIRESVRAM, 8000);
+    dissolve_step = 0;
 }
 
 // void, not bool -- see section_common.h's own header comment for why.
-// Calls section_mark_finished() once the reveal completes -- this
-// section has a real, natural end (unlike the wave/scroll sections either
-// side of it), so main.c advances into section_macaw_showcase as soon as
-// it's done rather than waiting out its own max_ticks.
+// Calls section_mark_finished() once the wipe reaches the bottom of the
+// screen -- this section has a real, natural end (unlike the wave/scroll
+// sections either side of it), so main.c advances into
+// section_macaw_showcase as soon as it's done rather than waiting out
+// its own max_ticks.
 void section_dissolve_showcase_tick(const HiresBitmap *screen)
 {
-    if (stage == STAGE_FADE)
-    {
-        apply_stride(fade_strides[fade_step]);
-        fade_step++;
-        if (fade_step >= NUM_FADE_STRIDES)
-            stage = STAGE_REVEAL;
-        return;
-    }
-
-    {
-        uint16_t i;
-        for (i = 0; i < PIXELS_PER_TICK && pixels_revealed < _DISSOLVE_PIXEL_COUNT; i++)
-        {
-            uint16_t position = dissolve_next();
-            uint8_t y = (uint8_t)(position / HIRES_WIDTH_PX);
-            uint8_t x = (uint8_t)(position % HIRES_WIDTH_PX);
-            hb_put(screen, x, y, true);
-            pixels_revealed++;
-        }
-        if (pixels_revealed >= _DISSOLVE_PIXEL_COUNT)
-            section_mark_finished();
-    }
+    (void)screen;
+    dissolve_step++;
+    picture_load(MACAW_FILE, (void *)HIRESVRAM, (uint16_t)dissolve_step * DISSOLVE_BYTES_PER_STEP);
+    if (dissolve_step >= DISSOLVE_TOTAL_STEPS)
+        section_mark_finished();
 }
