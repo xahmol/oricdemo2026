@@ -25,7 +25,6 @@
 #include "section_sprite_showcase.h"
 #include "section_scroll_showcase.h"
 #include "section_wave_showcase.h"
-#include "section_dissolve_showcase.h"
 #include "section_macaw_showcase.h"
 #include "section_rasterirq_showcase.h"
 #include "section_credits.h"
@@ -167,12 +166,6 @@ typedef struct
     void (*tick)(const HiresBitmap *screen);
     uint16_t min_ticks;
     uint16_t max_ticks;
-    // true: skip transition_clear()'s own wipe after this section (the
-    // NEXT section's own init() picks up exactly where this one left
-    // off). Defaults to false (0) for every entry that doesn't set it
-    // explicitly -- see section_dissolve_showcase's own entry below for
-    // the one real use, and this project's own planning notes for why.
-    bool skip_transition_after;
 } DemoSection;
 
 static bool section_finished_flag;
@@ -422,15 +415,6 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define WAVE_SHOWCASE_MIN_TICKS  6u
 #define WAVE_SHOWCASE_MAX_TICKS 200u
 
-// Dissolve showcase: has a real natural end (its own tick() calls
-// section_mark_finished() once the reveal completes, see
-// section_dissolve_showcase.c) -- max_ticks is purely a safety backstop,
-// generous enough that it should never actually fire. min_ticks is
-// deliberately tiny: this section is a brief transition, not content to
-// linger on, so an impatient keypress skipping it early is fine.
-#define DISSOLVE_SHOWCASE_MIN_TICKS  5u
-#define DISSOLVE_SHOWCASE_MAX_TICKS 300u
-
 // Macaw showcase: loops its own caption scroll indefinitely (its own
 // tick() never calls section_mark_finished()). Trimmed per user feedback
 // that the overall demo ran too long.
@@ -469,18 +453,6 @@ static const DemoSection sections[] = {
     { section_sprite_showcase_init, section_sprite_showcase_tick, SPRITE_SHOWCASE_MIN_TICKS, SPRITE_SHOWCASE_MAX_TICKS },
     { section_scroll_showcase_init, section_scroll_showcase_tick, SCROLL_SHOWCASE_MIN_TICKS, SCROLL_SHOWCASE_MAX_TICKS },
     { section_wave_showcase_init, section_wave_showcase_tick, WAVE_SHOWCASE_MIN_TICKS, WAVE_SHOWCASE_MAX_TICKS },
-    // skip_transition_after=true: this section's own natural end already
-    // shows macaw.bin fully, in place -- see section_dissolve_showcase.c's
-    // own header comment for why running transition_clear()'s generic
-    // wipe here (as every other section boundary does) would immediately
-    // erase that result, only for section_macaw_showcase_init() to
-    // silently reload the EXACT SAME picture data a moment later. That
-    // wipe-then-instantly-reload sequence read as "the picture flashes,
-    // disappears, then reappears" (real user-reported feedback) -- not a
-    // real transition, just redundant churn since this is the ONE section
-    // boundary where consecutive sections intentionally show identical
-    // content.
-    { section_dissolve_showcase_init, section_dissolve_showcase_tick, DISSOLVE_SHOWCASE_MIN_TICKS, DISSOLVE_SHOWCASE_MAX_TICKS, true },
     { section_macaw_showcase_init, section_macaw_showcase_tick, MACAW_SHOWCASE_MIN_TICKS, MACAW_SHOWCASE_MAX_TICKS },
     { section_rasterirq_showcase_init, section_rasterirq_showcase_tick, RASTERIRQ_SHOWCASE_MIN_TICKS, RASTERIRQ_SHOWCASE_MAX_TICKS },
     { section_credits_init, section_credits_tick, CREDITS_MIN_TICKS, CREDITS_MAX_TICKS },
@@ -601,8 +573,7 @@ int main(void)
         for (i = 0; i < NUM_SECTIONS; i++)
         {
             run_section(&sections[i], &screen);
-            if (!sections[i].skip_transition_after)
-                transition_clear(&screen);
+            transition_clear(&screen);
         }
     }
 

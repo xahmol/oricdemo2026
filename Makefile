@@ -109,8 +109,6 @@ MAIN_SRCS = \
   src/section_scroll_showcase.h \
   src/section_wave_showcase.c \
   src/section_wave_showcase.h \
-  src/section_dissolve_showcase.c \
-  src/section_dissolve_showcase.h \
   src/section_macaw_showcase.c \
   src/section_macaw_showcase.h \
   src/section_rasterirq_showcase.c \
@@ -331,8 +329,6 @@ FLOPPY_SRCS = \
   src/section_scroll_showcase.h \
   src/section_wave_showcase.c \
   src/section_wave_showcase.h \
-  src/section_dissolve_showcase.c \
-  src/section_dissolve_showcase.h \
   src/section_macaw_showcase.c \
   src/section_macaw_showcase.h \
   src/section_rasterirq_showcase.c \

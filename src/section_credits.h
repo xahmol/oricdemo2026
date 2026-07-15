@@ -5,7 +5,7 @@
 // next line once scroller_tick() returns true, chaining through
 // strings_en.h's MSG_CREDIT_* lines until they're exhausted, then calls
 // section_mark_finished() (a real natural end, like
-// section_dissolve_showcase.c's own reveal-completion). Backdrop:
+// section_splash.c's own fade-out completing). Backdrop:
 // assets/sunset.bin (see section_credits.c's own header comment for its
 // sourcing/attribution). This is the LAST slot in main.c's sections[]
 // table -- that array's own outer for(;;) loop already cycles back to

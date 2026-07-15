@@ -82,7 +82,7 @@
 #define COLOR_CYCLE_FIRINGS  32u
 // Full top-to-bottom passes (each pass == HIRES_ROWS firings, ~4s at
 // 50Hz) before this section calls section_mark_finished() -- a real
-// natural end, like section_dissolve_showcase's own reveal-completion.
+// natural end, like section_splash.c's own fade-out completing.
 #define TOTAL_PASSES         4u
 
 #define RASTERBAR_ISR_OFFSET 20u   // delay units since the previous callback fired -- see rasterirq.h

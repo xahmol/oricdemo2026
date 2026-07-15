@@ -86,7 +86,7 @@ void section_credits_init(const HiresBitmap *screen)
 // void, not bool -- see section_common.h's own header comment for why.
 // Calls section_mark_finished() once every credit_lines[] entry has
 // scrolled fully off screen -- a real natural end, like
-// section_dissolve_showcase.c's own reveal-completion.
+// section_splash.c's own fade-out completing.
 void section_credits_tick(const HiresBitmap *screen)
 {
     if (scroller_tick(screen))
