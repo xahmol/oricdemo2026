@@ -1,7 +1,7 @@
 # Oscar64 Compiler Reference — Fast-Retrieval Memory Bank
 
-**Source:** `/home/xahmol/oscar64/`  
-**Tutorials (local):** `/home/xahmol/OscarTutorials/`  
+**Source:** `~/oscar64/` (wherever Oscar64 is cloned locally — see `OSCAR64_HOME`)  
+**Tutorials (local):** `~/OscarTutorials/` (wherever the tutorials repo is cloned locally)  
 **Online manual:** https://github.com/drmortalwombat/oscar64/blob/main/oscar64.md  
 **Tutorials:** https://github.com/drmortalwombat/OscarTutorials
 
@@ -1400,7 +1400,7 @@ See tutorials 4500–4520.
 Each frame: `vspr_sort()` → `rirq_wait()` → `vspr_update()` → `rirq_sort()`. Or: drive `vspr_update()` + `rirq_sort()` from `rirq_call()` in IRQ. See tutorials 1710, 1750.
 
 ### Tutorials local path
-`/home/xahmol/OscarTutorials/` — numbered 0010–5030, Resources/ subfolder has .ctm/.spd/.sid/.bin assets.
+`~/OscarTutorials/` (wherever cloned) — numbered 0010–5030, Resources/ subfolder has .ctm/.spd/.sid/.bin assets.
 
 ---
 
