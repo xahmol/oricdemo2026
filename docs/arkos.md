@@ -74,14 +74,17 @@ buffer out of the ~36KB main code/data/BSS budget:
   leaves it enabled for the rest of the program's runtime -- this project's
   own demo code never calls ROM after that point, so there's nothing to
   lose. **Known gap**: this specific mechanism is empirically confirmed
-  only for Phosphoric; a plain Oricutron tape boot (`make run`, no disk
-  controller attached) very likely does NOT provide working overlay RAM,
+  only for Phosphoric; a plain Oricutron tape boot with no disk
+  controller attached very likely does NOT provide working overlay RAM,
   since nothing in that configuration responds to `$0314` writes at all
   (Oricutron's own Microdisc emulation, which does correctly implement
   ROM-disable-on-`$0314`, is only present when a disk controller is
-  actually attached -- e.g. via `--disk-rom`). This is an accepted,
-  deliberate scope decision, not an oversight -- `make run-phos` and the
-  floppy target both work.
+  actually attached -- e.g. via `--disk-rom`). Moot in practice for this
+  project's own Makefile: there is no plain "Oricutron, tape, no disk
+  controller" target at all (Oricutron also has no LOCI emulation, so
+  such a target could only ever show a silently-degraded demo regardless
+  -- see `CLAUDE.md`) -- `make run-phos` and the floppy target
+  (`make run-disk`) both work.
 - **Floppy target**: no ROM/overlay concept at all -- see
   [floppy.md](floppy.md): "full RAM mapped at `$C000-$FFFF` for the whole
   session." `arkos_load()` is a plain `floppy_load()` call, no

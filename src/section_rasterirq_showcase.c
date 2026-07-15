@@ -11,8 +11,8 @@
 // deliberately-chosen extra risk rather than a free win on this hardware.
 //
 // BACKDROP: 3 five-pointed stars (filled/hollow/patterned -- one each,
-// showing off hb_polygon_fill()/hb_line()/hb_flood_fill() in one section),
-// drawn PROCEDURALLY via hires.h's own shape primitives at init() -- no
+// showing off hb_line()+hb_flood_fill() in one section), drawn
+// PROCEDURALLY via hires.h's own shape primitives at init() -- no
 // picture asset at all, per explicit user direction ("draw some stars
 // with our hires functions"), white ink on black paper only (matches the
 // bars' own erase baseline exactly, see rb_step()'s comment below for why

@@ -55,7 +55,7 @@
 #include "section_wave_showcase.h"
 
 #ifdef STORAGE_FLOPPY
-#define ORICMAG_FILE 6
+#define ORICMAG_FILE 5
 #else
 #define ORICMAG_FILE "oricmag.bin"
 #endif

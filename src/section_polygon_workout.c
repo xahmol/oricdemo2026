@@ -7,13 +7,16 @@
 // shifting grey shade (`NineShadesOfGrey`) -- not reproduced here: Oric
 // HIRES has no per-pixel/per-cell colour to shade a fill with (ink/paper
 // is a serial per-ROW-SPAN attribute, see hires.h's own header comment),
-// and Round 5 found hb_polygon_fill() has a real, unresolved Oscar64 -O2
-// whole-program register-allocator bug that only manifests at SOME real
-// call sites (silently drops most of its fill loop's iterations) -- see
-// ~/.claude/plans/sorted-swinging-thacker.md's "Round 6" section and
-// ~/.claude/oscar64.md for the full writeup. This section is WIREFRAME
-// ONLY (hb_line(), not hb_polygon_fill()) specifically to sidestep that
-// risk entirely, not just for stylistic reasons.
+// and `hb_polygon_fill()` (tried first) turned out to have a real,
+// unresolved Oscar64 -O2 whole-program register-allocator bug that only
+// manifested at SOME real call sites (silently dropped most of its fill
+// loop's iterations) -- see ~/.claude/oscar64.md for the full writeup.
+// That function was later removed from the library entirely (a second,
+// separate problem -- a division-heavy inner loop made it severely slow
+// even when it DID work correctly -- see hires.h's own header comment).
+// This section is WIREFRAME ONLY (hb_line(), never a fill primitive)
+// specifically to sidestep that whole risk category, not just for
+// stylistic reasons.
 //
 // hb_line() itself was verified safe at this file's own real call depth
 // (Round 6 plan's own mandatory gate 1) via a minimal single-call smoke

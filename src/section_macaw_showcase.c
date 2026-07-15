@@ -17,7 +17,7 @@
 #include "section_macaw_showcase.h"
 
 #ifdef STORAGE_FLOPPY
-#define MACAW_FILE 7
+#define MACAW_FILE 6
 #else
 #define MACAW_FILE "macaw.bin"
 #endif

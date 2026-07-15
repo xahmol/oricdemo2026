@@ -13,9 +13,13 @@ that flag only disables `printf`/`scanf`'s `%f` format support (see
 `include/crt_math.c` already provides the float runtime this project's
 default build needs regardless.
 
-Not currently used by any demo code in `src/` — available for future
-wireframe/3D-projection effects on top of [hires.md](hires.md)'s drawing
-primitives (e.g. `vec3_project`/`mat4_make_perspective` into `hb_line`
-calls). See Oscar64's own source (`~/oscar64/include/gfx/vector3d.h`) for
-the full function list — every function is a straightforward, self-
+Used by `src/section_func3d.c` for its rotating 3D wireframe height-field
+mesh: `mat4_make_perspective` builds the camera projection once at init,
+`mat4_set_rotate_x`/`mat4_set_rotate_y`/`mat4_rmmul`/`mat4_mmul` combine
+world/rotation/perspective transforms every rotation step, and
+`vec3_project` turns each mesh vertex into 2D screen coordinates fed to
+[hires.md](hires.md)'s `hb_line`-based drawing (via that section's own
+local Bresenham helper — see its header comment for why not `hb_line`
+directly). See Oscar64's own source (`~/oscar64/include/gfx/vector3d.h`)
+for the full function list — every function is a straightforward, self-
 documenting one-liner (`vec3_sum`, `mat4_mmul`, `mat4_set_rotate_x`, etc.).

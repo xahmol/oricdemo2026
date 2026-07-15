@@ -16,6 +16,7 @@
 #include "floppy.h"
 #else
 #include "loci.h"
+#include "homedir.h"
 #endif
 
 static uint8_t arkos_peek(uint16_t addr)
@@ -550,6 +551,16 @@ static void arkos_setup_irq_bridge(void)
     *(volatile uint8_t *)0xFFFF = (uint8_t)((uint16_t)arkos_irq_bridge_code >> 8);
 }
 
+// Real-hardware fix: a bare filename (e.g. "steppingout.aky") isn't
+// reliably resolved against the right directory on real, multi-drive
+// LOCI setups (see homedir.h's own header comment for the full story --
+// this project's own real-hardware regression, same root cause and fix
+// as OricScreenEditorLOCI's earlier one). static, not a local/stack
+// buffer, matching this project's own "large arrays must be static"
+// discipline (an earlier version of the same fix in a sibling project
+// blew Oscar64's static stack budget using local buffers here).
+static char arkos_load_path[HOMEDIR_MAXLEN + 32];
+
 bool arkos_load(const char *path)
 {
     int16_t r;
@@ -559,7 +570,8 @@ bool arkos_load(const char *path)
     // Bank in RAM at $C000-$FFFF before loading (see arkos.h's own comment
     // for why this stays enabled for the rest of the program's runtime).
     enable_overlay_ram();
-    r = file_load(path, (uint8_t *)ARKOS_MODULE, ARKOS_MAX_MODULE_SIZE);
+    homedir_join(arkos_load_path, path);
+    r = file_load(arkos_load_path, (uint8_t *)ARKOS_MODULE, ARKOS_MAX_MODULE_SIZE);
     if (r < 0)
     {
         disable_overlay_ram();

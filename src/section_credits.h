@@ -1,4 +1,4 @@
-// section_credits.h - Phase 9's closing credits scroller
+// section_credits.h - the demo's closing credits scroller
 //
 // Reuses include/scroller.h's engine UNCHANGED (still one string at a
 // time) -- section_credits_tick() just re-calls scroller_init() with the

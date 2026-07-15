@@ -1,4 +1,4 @@
-// section_rasterirq_showcase.h - Phase 8's standalone raster-bar showcase
+// section_rasterirq_showcase.h - standalone raster-bar showcase
 //
 // Distinct from section_logo.c's own subtler circling-bar accent (a
 // per-tick, main-loop-paced static write -- ~16.7Hz, see

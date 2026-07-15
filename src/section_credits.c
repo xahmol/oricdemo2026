@@ -34,7 +34,7 @@
 #include "section_common.h"
 
 #ifdef STORAGE_FLOPPY
-#define SUNSET_FILE 8
+#define SUNSET_FILE 7
 #else
 #define SUNSET_FILE "sunset.bin"
 #endif

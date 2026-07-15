@@ -32,8 +32,14 @@
 #include "rom_charset.h"
 #include "idi8b_altcharset.h"
 
-// Background music: assets/steppingout.aky ("Mr.Lou - Dewfall Productions -
-// Stepping out (2019)"), an Arkos Tracker module exported to $C000 -- see
+// Background music: assets/steppingout.aky ("Stepping out" (2019) by
+// Roald Strauss / Mr.Lou, Dewfall Productions -- via indiegamemusic.com,
+// www.indiegamemusic.com/viewtrack.php?id=4112) and assets/boulesetbits.aky
+// ("Boules Et Bits" by Tom & Jerry -- from Arkos Tracker's own bundled
+// sample-song folder, www.julien-nevo.com/arkostracker/), both Arkos
+// Tracker modules exported to $C000 -- same two tracks, same
+// sourcing/crediting convention as OSDK's own Arkos-Music-Player demo
+// (github.com/Oric-Software-Development-Kit/Arkos-Music-Player). See
 // docs/arkos.md for the full format writeup, why this player replaced the
 // earlier PT3 (Vortex Tracker) one (archived on the `pt3` branch after
 // several rounds of decode-bug fixes still didn't produce satisfying music,
@@ -125,9 +131,9 @@ __interrupt void main_frame_tick_isr(void)
 
 // A demo "section" -- one entry per part of the running order (idi8b
 // splash, logo/raster-bar intro, the bird scene, each showcase, credits
-// -- see docs/README.md or the project's own planning notes for the full
-// list; only the bird scene exists so far, everything else lands in
-// later phases). `init` is called once, `tick` every main-loop iteration
+// -- see the sections[] table below for the full, final running order,
+// or docs/architecture.md for a per-section technique summary). `init`
+// is called once, `tick` every main-loop iteration
 // thereafter, both given the same shared `screen` canvas every section
 // uses. `min_ticks`/`max_ticks` count main-loop iterations (NOT raw 50Hz
 // raster ticks -- see MAIN_FRAME_PACING_TICKS, each iteration already
@@ -310,15 +316,8 @@ static void transition_clear(const HiresBitmap *screen)
 
 // Wraps the existing background/clouds/bird trio as a single section --
 // section_background_run() doubles as this section's own init (it was
-// always a one-shot draw, not persistent per-section state), same
-// ordering as before this refactor (background, then the TEXT footer,
-// then clouds, then bird). min_ticks/max_ticks are both set to
-// (effectively) "never" for now -- there is no other section yet for
-// this one to advance into, so this phase is a pure structural refactor,
-// not a behaviour change; real pacing numbers land once section #4
-// (the first showcase section) actually exists to advance into.
-#define SECTION_FOREVER 0xFFFFu
-
+// always a one-shot draw, not persistent per-section state): background,
+// then the TEXT footer, then clouds, then bird.
 static void bird_scene_init(const HiresBitmap *screen)
 {
     section_background_run(screen);
@@ -366,9 +365,8 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define LOGO_MIN_TICKS 6u
 #define LOGO_MAX_TICKS 300u
 
-// Bird scene: now that section #4 exists to advance into, gets real
-// pacing instead of SECTION_FOREVER. Trimmed from an original ~30s
-// (400 ticks) per user feedback that the overall demo ran too long.
+// Bird scene: no natural end (loops the background/clouds/bird trio
+// indefinitely), so min_ticks/max_ticks are the only thing pacing it.
 #define BIRD_MIN_TICKS  6u
 #define BIRD_MAX_TICKS 250u
 
@@ -439,10 +437,10 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define CREDITS_MIN_TICKS   6u
 #define CREDITS_MAX_TICKS 1200u
 
-// The demo's own running order -- currently the idi8b splash, the Oric
-// logo/raster-bar intro, the bird scene, and the HIRES shapes showcase;
-// later phases insert the remaining showcase sections/credits after (see
-// this project's own planning notes for the full list).
+// The demo's own running order, final and complete (12 sections) -- see
+// docs/architecture.md for a one-paragraph technique summary per section.
+// The outer for(;;) loop in main() below cycles through this table
+// forever, so credits (the last entry) loops back into the splash.
 static const DemoSection sections[] = {
     { section_splash_init, section_splash_tick, SPLASH_MIN_TICKS, SPLASH_MAX_TICKS },
     { section_logo_init, section_logo_tick, LOGO_MIN_TICKS, LOGO_MAX_TICKS },

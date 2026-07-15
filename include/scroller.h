@@ -26,11 +26,17 @@
 // report), so this trades perceived smoothness for real speed, which is
 // the actual win here.
 //
+// Follow-up: 6px EVERY tick then read as too fast to comfortably read --
+// scroller.c's own SCROLLER_TICKS_PER_STEP now throttles how often the
+// column advances (a plain tick delay, not a smaller step size -- see
+// that constant's own comment for why a genuine sub-byte 2-3px step was
+// considered and rejected).
+//
 // Caller owns the row band's own colour setup (hires_row_colors()) --
 // this module only ever touches pixel content. Two styles (SCROLLER_PLAIN/
 // SCROLLER_BOUNCE) share the same engine, parameterized so
 // src/section_scroll_showcase.c, src/section_macaw_showcase.c, and
-// (later) src/section_credits.c can reuse it with different text/style.
+// src/section_credits.c all reuse it with different text/style.
 
 #ifndef SCROLLER_H
 #define SCROLLER_H

@@ -10,6 +10,20 @@
 // the old smooth-but-slow per-pixel design.
 #define SCROLL_STEP_COLS    1
 
+// Ticks (main-loop iterations, ~60ms each) to wait between advancing
+// text_start_col -- NOT a smaller/fractional SCROLL_STEP_COLS: a genuine
+// sub-byte (2-3px) scroll would need every visible column's displayed
+// byte re-derived as a bit-shifted composite of TWO adjacent glyph bytes
+// every step, real new complexity and per-tick cost that reintroduces
+// much of what the byte-aligned redesign above was specifically built to
+// eliminate. A plain tick delay (same technique as
+// section_dissolve_showcase's own DISSOLVE_TICKS_PER_STEP, before that
+// section was removed) gets the same practical "easier to read" result
+// -- slower motion -- at zero risk, keeping the whole byte-aligned copy
+// unchanged. 2 ticks/step here roughly halves the scroll speed (was
+// reported "too fast" at 1 tick/step); raise further if still too fast.
+#define SCROLLER_TICKS_PER_STEP 2u
+
 #define BOUNCE_AMPLITUDE    6   // max +/- vertical offset in pixels (SCROLLER_BOUNCE)
 // Deliberately NOT "6u": mixing an unsigned literal into an expression
 // with oric_cos()'s SIGNED result silently promotes the whole expression
@@ -28,6 +42,7 @@ static int16_t        text_start_col;  // column-byte where text[0] currently si
 static uint8_t         bounce_angle;
 static uint8_t         prev_y;
 static bool            has_prev;
+static uint8_t         step_tick_count;
 
 static uint8_t max_col(void)
 {
@@ -59,6 +74,7 @@ void scroller_init(const HiresBitmap *screen, const char *s, uint8_t y, Scroller
     text_start_col = (int16_t)max_col() + 1;   // starts just off the right edge
     bounce_angle   = 0;
     has_prev       = false;
+    step_tick_count = 0;
 }
 
 bool scroller_tick(const HiresBitmap *screen)
@@ -101,6 +117,16 @@ bool scroller_tick(const HiresBitmap *screen)
 
     if ((int16_t)text_start_col + (int16_t)text_len < (int16_t)SCROLLER_MIN_COL)
         return true;   // fully scrolled off the left edge
+
+    // Only the COLUMN advance is throttled -- the redraw above (and
+    // SCROLLER_BOUNCE's own vertical wobble) still runs every tick, so
+    // bounce motion stays smooth even though horizontal movement is
+    // slower. See SCROLLER_TICKS_PER_STEP's own comment for why this is
+    // a delay, not a smaller SCROLL_STEP_COLS.
+    step_tick_count++;
+    if (step_tick_count < SCROLLER_TICKS_PER_STEP)
+        return false;
+    step_tick_count = 0;
 
     text_start_col = (int16_t)(text_start_col - SCROLL_STEP_COLS);
 

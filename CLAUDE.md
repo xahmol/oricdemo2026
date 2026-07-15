@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`oricdemo2026` — an Oric computer demoscene project (per README: "Testing vibe coding
-an Oric demo"). Target: Oric Atmos, bare-metal (no ROM calls), 6502A @ 1 MHz.
+`oricdemo2026` — a finished, 12-section Oric Atmos demoscene production (see
+`README.md` for the full section list and `docs/architecture.md` for the technical
+writeup). Target: Oric Atmos, bare-metal (no ROM calls), 6502A @ 1 MHz.
 
 ## Toolchain
 
@@ -37,38 +38,60 @@ builds with `oric_crt_floppy.c` (the floppy target's own regression
 fixture, analogous to `buildtest.c`). Never mix runtimes for the same
 program.
 
-**Two distribution targets, both now the real demo.** The tape target
-(`all`/`run`/`usb`, below) and the floppy-disk target (`disk`/`run-disk`)
+**Two distribution targets, both the real demo.** The LOCI target
+(`all`/`usb`, below) and the floppy-disk target (`disk`/`run-disk`)
 are BOTH the real demo (`src/main.c` + `src/section_*.c`) — no "simple tap
-only" version. Tape/LOCI no longer depends on LOCI for graphics (only for
-loading its music file at runtime), so it runs fine in plain Oricutron,
-including real AY audio — Phosphoric ALSO emulates real AY audio, so
-`make run-phos` (below) is just as valid a way to see/hear the real demo.
-The floppy-disk target is a bootable Microdisc
-`.dsk` image needing no LOCI device and no DOS/SEDORIC resident, with the
-music file baked into the disk image instead — see
-[docs/floppy.md](docs/floppy.md). Both targets are built and tested
-completely independently, and both source the SAME `src/main.c`/
-`src/section_*.c` content.
+only" version. **The LOCI target genuinely depends on LOCI** — every
+picture (`include/picture.h`) and both music tracks (`include/arkos.h`)
+load from disk at runtime via `include/loci.c`'s `file_load()`, not just
+music (an EARLIER state of this project only loaded music this way; that
+is no longer true — don't trust old commit messages/comments implying
+otherwise). Concretely: **Oricutron has no LOCI emulation at all** — this
+is exactly why there is deliberately NO plain `make run` target for the
+LOCI target (removed on purpose, not an oversight): it could only ever
+load and run `build/oricdemo.tap`'s code while every picture/music load
+silently failed (this project's own established graceful-failure
+convention, not a crash), leaving a mostly-blank, silent demo. **Phosphoric
+DOES emulate LOCI** (`--loci-flash <dir>`, mounting a real directory as
+the LOCI's own flash storage) — `make run-phos` passes `--loci-flash
+assets`, so it's the one Oricutron/Phosphoric option that actually
+shows/plays the full LOCI-target demo (plus real AY audio, same as
+Oricutron would give). The floppy-disk target is a bootable Microdisc
+`.dsk` image needing no LOCI device and no DOS/SEDORIC resident at all —
+every asset is baked into the disk image itself — see
+[docs/floppy.md](docs/floppy.md); `make run-disk` in Oricutron shows the
+full demo with no caveats, AND gives the same Oricutron debugger/monitor
+access (F2, breakpoints) a LOCI-target Oricutron run would have had — the
+reason removing plain `run` loses nothing real. Both targets are built
+and tested completely
+independently, and both source the SAME `src/main.c`/`src/section_*.c`
+content. See `README.md`'s own Installation section for the full LOCI
+distribution/install flow (8 files that must all sit in one folder).
 
 Build chain (see `Makefile`):
 ```
 make            # compile -> build/oricdemo.bin (Oscar64, HIRES runtime) -> build/oricdemo.tap
-make run        # launch the real demo (build/oricdemo.tap) in Oricutron (needs ORICUTRON_HOME)
-make run-phos   # launch the real demo (build/oricdemo.tap) visually in Phosphoric instead --
-                # both emulators give real AY audio; needs PHOSDIR in .env, oric1-emu
-                # built with SDL2=1
+make run-phos   # launch the real demo (build/oricdemo.tap) visually in Phosphoric, WITH
+                # LOCI emulation (--loci-flash assets) -- the full experience, real AY audio too;
+                # needs PHOSDIR in .env, oric1-emu built with SDL2=1
 make run-phos-buildtest # launch src/buildtest.c (build/buildtest.tap) visually in Phosphoric --
                 # the build-chain/LOCI/Arkos regression test, not the real demo
 make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.py unit tests
 make test-hires # opt-in: HIRES library Phosphoric smoke test (separate .tap, oric_crt_hires.c)
 make test-pictconv # oric_pictconv.py unit tests alone (pure Python, no emulator)
 make test-capture CYCLES=N TYPEKEYS='...'   # calibration helper, dumps RAM+screenshot, no assertions
-make usb        # copy build/oricdemo.tap + assets/steppingout.aky (real demo + music) to USBPATH (.env)
+make usb        # copy build/oricdemo.tap + all 7 assets/*.aky|*.bin (LOCI target) + build/oricdemo_floppy.dsk to USBPATH (.env)
 make docs       # README.md -> README.pdf (needs pandoc)
-make zip        # release ZIP (build/oricdemo.tap + assets/steppingout.aky + README.pdf)
+make zip        # release ZIP: build/oricdemo.tap + all 7 assets/*.aky|*.bin laid out under
+                # idi8b/oricdemo2026/ (matching .env.example's own USBPATH convention),
+                # plus build/oricdemo_floppy.dsk + README.pdf at the ZIP's top level
 make disk       # floppy-disk target, REAL demo -> build/oricdemo_floppy.dsk (see docs/floppy.md)
-make run-disk   # launch build/oricdemo_floppy.dsk (real demo) in Oricutron with --disk-rom microdisc.rom
+make run-disk   # launch build/oricdemo_floppy.dsk (real demo) in Oricutron with --disk-rom microdisc.rom --
+                # fully self-contained, no LOCI caveat, shows the complete demo -- this is also
+                # the only Oricutron target now: there is deliberately NO plain 'make run' for the
+                # LOCI target (Oricutron has no LOCI emulation at all, so it could only ever show a
+                # silently-degraded demo; run-disk already gives the same Oricutron debugger access
+                # -- F2, breakpoints -- with a fully working demo instead, so nothing is lost)
 make test-disk  # opt-in: src/floppy_test.c's OWN regression disk (build/floppytest.dsk, separate
                 # from 'disk' above -- see docs/floppy.md), Phosphoric smoke test (needs DISKROM)
 make clean
@@ -84,30 +107,38 @@ make clean
 - `src/main.c` — the real demo's entry point, HIRES mode, built for BOTH
   distribution targets (`oric_crt_hires.c` for tape, `oric_crt_floppy_hires.c`
   for floppy — same source, `#ifdef STORAGE_FLOPPY` only changes which
-  `arkos_load()` overload/music-file-reference is used). A thin sequencer:
-  `hires_init()`/mode-switch/background/footer/music setup, then a master
-  loop calling each section's own `_tick()` function every iteration (see
-  `src/section_bird.h`/`src/section_clouds.h`) — sections own their state,
-  `main.c` just drives the shared loop so multiple animated sections (bird,
-  clouds) run concurrently rather than each hogging its own `for(;;)`.
-- `src/section_background.c`/`.h` — draws the static sky+creek background
-  once at startup (plain PAPER colour bands: cyan sky, blue creek — see
-  that file's own header comment for why it's colour-only, no pixel
-  texture, and the known Phosphoric rendering bug that constrains it).
-- `src/section_clouds.c`/`.h` — parallax cloud layer in the sky's upper
-  rows: a `HiresBitmap` sub-canvas scrolled independently of the bird via
-  its own `clouds_scroll_left()` (deliberately NOT `hires.h`'s general
-  `hb_scroll_left_fast` — see that function's own caveat about column-bytes
-  0-1). Ticks on its own cadence (every `CLOUD_SCROLL_EVERY` main-loop
-  ticks), giving a two-speed depth effect against the bird's own per-tick
-  horizontal movement.
-- `src/section_bird.c`/`.h` — animated bird flying both horizontally
-  (byte-aligned XOR sprite via `include/sprite.h`, 7-frame walk cycle) and
-  vertically (a sine wave via `include/fixedmath.h`'s `oric_sin()`), a nod
-  to the animated bird in the original "Welcome to Oric Atmos" demo
-  (oric.org/software/welcome_to_oric_atmos-593.html). Frame data is
-  `assets/bird.h`. Exposes `section_bird_init()`/`section_bird_tick()`
-  (not a `_run()` loop) — see `main.c`'s master loop above.
+  `arkos_load()`/`picture_load()` overload is used). A fixed `sections[]`
+  table (11 entries, one per `src/section_*.c` pair) plus a generic
+  `run_section()` runner: each section's own `init()` runs once, `tick()`
+  every main-loop iteration, advancing on a natural end
+  (`section_mark_finished()`), a keypress past `min_ticks`, or `max_ticks`
+  regardless. The outer loop cycles the whole table forever. See
+  `docs/architecture.md` for the full sequencer design and a one-line
+  technique summary per section — not duplicated here.
+- `src/section_background.c`/`.h`, `src/section_clouds.c`/`.h`,
+  `src/section_bird.c`/`.h` — the opening bird scene (section #3): a
+  static sky+creek background (plain PAPER colour bands — see that file's
+  own header comment for why, and the Phosphoric rendering bug that
+  constrains it), a parallax cloud layer (its own
+  `clouds_scroll_left()`, deliberately NOT `hires.h`'s general
+  `hb_scroll_left_fast` — see that function's own column-bytes 0-1
+  caveat), and an animated bird (byte-aligned XOR sprite,
+  `assets/bird.h`, 7-frame walk cycle + a fixed-point sine-wave vertical
+  path) — a nod to the animated bird in the original "Welcome to Oric
+  Atmos" demo (oric.org/software/welcome_to_oric_atmos-593.html).
+  Exposed as `bird_scene_init()`/`bird_scene_tick()` in `main.c` (all
+  three sub-modules wrapped as one `sections[]` entry).
+- `src/section_splash.c`/`.h`, `src/section_logo.c`/`.h`,
+  `src/section_hires_showcase.c`/`.h`, `src/section_polygon_workout.c`/`.h`,
+  `src/section_func3d.c`/`.h`, `src/section_sprite_showcase.c`/`.h`,
+  `src/section_scroll_showcase.c`/`.h`, `src/section_wave_showcase.c`/`.h`,
+  `src/section_macaw_showcase.c`/`.h`, `src/section_rasterirq_showcase.c`/`.h`,
+  `src/section_credits.c`/`.h` — the remaining 8 sections (splash, logo,
+  and every showcase after the bird scene) — see `docs/architecture.md`'s
+  per-section technique table, and each file's own header comment for
+  full design rationale (several document real, hard-won Oscar64
+  `-O2` miscompilation workarounds — don't restructure that code without
+  reading those comments first).
 - `src/buildtest.c` — TEXT-mode build-chain regression test (default
   `oric_crt.c` runtime; NOT demo content, not built by `all`/`usb`/`zip`).
   Inits the TEXT-mode libraries and reports LOCI/IJK detection status on
@@ -169,13 +200,21 @@ make clean
   - `ttf.c/h` — proportional bitmap-font rendering on top of `hires.c`, fed by
     `tools/oric_ttfconv.py`. See `docs/ttf.md`.
   - `vector3d.c/h` — 3D vector/matrix math, copied verbatim from Oscar64's own
-    `include/gfx/`. Not currently used by any demo code. See `docs/vector3d.md`.
+    `include/gfx/`. Used by `src/section_func3d.c`'s rotating wireframe
+    height-field mesh (perspective projection + rotation transforms). See
+    `docs/vector3d.md`.
   - `fixedmath.c/h` — 256-entry fixed-point sine/cosine table (fast plasma/
     sinus-scroll effects). Generic, not HIRES-specific. See `docs/fixedmath.md`.
   - `sprite.c/h` — "save-under" sprite system on top of `hires.c`'s `hb_bitblit`.
     See `docs/sprite.md`.
   - `dissolve.c/h` — fade/dissolve transitions (strided attribute fade + LFSR
-    pixel dissolve) for HIRES mode. See `docs/dissolve.md`.
+    pixel dissolve) for HIRES mode. Not used by any real demo content —
+    only `src/hires_test.c`'s own test fixture exercises it. A real demo
+    section built around this exact technique
+    (`src/section_dissolve_showcase.c`) was tried, redesigned twice, and
+    ultimately removed (a genuine two-picture crossfade wasn't safely
+    achievable within this project's memory budget — see
+    `docs/dissolve.md`'s own note). See `docs/dissolve.md`.
   - `rasterirq.c/h` — raster IRQ / mid-frame colour-split effects via a
     self-contained VIA Timer 1 handler. The only module that enables
     interrupts (`hrirq_start()`) — everything else in this project runs with
@@ -199,6 +238,12 @@ make clean
     `-dSTORAGE_FLOPPY` — `arkos_load()`'s signature differs by target
     (runtime path string vs. compile-time file index), a real, intentional
     difference, not a bug (see `docs/floppy.md`). See `docs/arkos.md`.
+  - `picture.c/h` — runtime loader for pre-rendered HIRES pictures
+    (`tools/oric_pictconv.py`'s `--format bin` output), same reasoning and
+    same dual-signature `#ifdef STORAGE_FLOPPY` convention as `arkos.c/h`
+    (keeps ~8000 bytes/picture out of the main code/data/BSS budget).
+    Every real picture in the demo loads through this, not a compiled-in
+    array. See `docs/picture.md`.
 - `tools/mktap.py` — wraps an Oscar64 raw `.bin` in an Oric `.tap` tape header.
 - `tools/oric_pictconv.py` — JPG/PNG -> HIRES bitmap converter (mono/colored/aic
   modes). See `docs/pictconv.md`.
@@ -240,10 +285,15 @@ make clean
     find it.
   - `tests/sandbox/`, `tests/out/` — gitignored scratch, regenerated per run.
 - `assets/` — real demo assets consumed by `src/section_*.c` files (as opposed
-  to `tests/fixtures/`, which only test scaffolding uses). `assets/bird.h` —
-  7-frame walk-cycle sprite data for `src/section_bird.c`, adapted from
-  mihai-dragan's `oric_BAS` project (MIT License), github.com/xahmol/sprites
-  — see that file's header comment for the full attribution note.
+  to `tests/fixtures/`, which only test scaffolding uses): 2 Arkos `.aky`
+  music modules, 6 `oric_pictconv.py`-converted `.bin` pictures (loaded at
+  runtime via `include/picture.h`, see above — none compiled in), and
+  `assets/bird.h` (7-frame walk-cycle sprite data for
+  `src/section_bird.c`, adapted from mihai-dragan's `oric_BAS` project,
+  MIT License, github.com/xahmol/sprites — see that file's header comment
+  for the full attribution note). Every asset's exact source/license is
+  credited in a header comment at its own point of use in `src/`, and
+  summarized in `README.md`'s own Credits/Installation sections.
 - `oscar64manual.md` — Oscar64 compiler reference; `docs/` — per-library API
   reference (`docs/README.md` is the index); consult before re-deriving
   Oscar64 compiler behavior or library APIs from scratch.
@@ -253,8 +303,10 @@ make clean
 - `src/buildtest.c`/`src/hires_test.c`/`src/floppy_test.c` are build-chain
   smoke tests proving each runtime end-to-end (`make test`/`make test-hires`/
   `make test-disk`), not demo content. `src/main.c` (+ `src/section_*.c`) IS
-  the real demo content now, built for both distribution targets — extend
-  it with more `src/section_*.c` effect modules as the demo grows.
+  the real demo content, built for both distribution targets. The demo is
+  feature-complete (12 sections, `docs/architecture.md`'s own table) — a
+  request to add another section is a new scope decision, not a
+  continuation of an existing plan; nothing is "still to come."
 - The TEXT-mode `include/` library files (`charwin`, `keyboard`, `charset`,
   `ijk`, `loci`) are shared with `OricScreenEditorLOCI` and `locifilemanager-v2`
   but have already diverged between those two (they are copies, not a shared

@@ -2,134 +2,47 @@
 //
 // Inspired by Oscar64's own samples/hires/func3d.c -- a static, once-built
 // 3D height-field render (a rippling surface function, `f = -cos(r*16) *
-// exp(-2*r)`, projected through a perspective camera via gfx/vector3d.h,
-// hidden-surface-removed with a painter's-algorithm depth sort, and
-// rendered as SHADED, outlined quads). Kept: the same height function, the
-// same vector3d.h projection pipeline (mat4_make_perspective/
-// mat4_set_rotate_x/_y/mat4_rmmul/mat4_mmul/vec3_project -- all confirmed
-// working under this project's own -rt=include/oric_crt_hires.c runtime
-// via a real standalone build+Phosphoric run, not just a compile check --
-// see ~/.claude/plans/sorted-swinging-thacker.md's Round 6 section), and
-// the same progressive on-screen status captions. NOT kept: the
-// painter's-algorithm qsort + per-quad lighting/shading + quad-fill --
-// Oric HIRES has no per-pixel/per-cell colour to shade a fill with (see
-// hires.h's own header comment on ink/paper being a per-ROW-SPAN serial
-// attribute), and a pure WIREFRAME mesh needs no hidden-surface removal
-// at all (line draw order doesn't matter visually) -- so this section
-// skips straight from projected vertices to drawing the mesh's row-wise
-// and column-wise connecting lines, dropping func3d.c's own "Sorting
-// surfaces" caption along with the depth-sort it described.
+// exp(-2*r)`, projected through a perspective camera via gfx/vector3d.h)
+// and the same progressive on-screen status captions. NOT kept: the
+// original's painter's-algorithm qsort + per-quad lighting/shading +
+// quad-fill -- Oric HIRES has no per-pixel/per-cell colour to shade a
+// fill with (see hires.h's own header comment on ink/paper being a
+// per-ROW-SPAN serial attribute), and a pure WIREFRAME mesh needs no
+// hidden-surface removal at all (line draw order doesn't matter
+// visually) -- so this section skips straight from projected vertices to
+// drawing the mesh's row-wise and column-wise connecting lines.
 //
 // GRID_SIZE=9 (an 8x8-quad, 81-vertex mesh) is deliberately far smaller
 // than Oscar64's own C64 sample's SIZE=31 (961 vertices) -- the Oric's
 // 1 MHz clock makes that scale impractical for a demo section that should
 // build in a few seconds, not tie up the whole section's hold time.
 //
-// A REAL, confirmed regression was found and fixed while adding this
-// section's own place in the section table (Round 6, after
-// section_polygon_workout.c already existed and had been verified
-// working): once `section_sprite_showcase` was ALSO added elsewhere in
-// the program, this section's own mesh started rendering intermittently
-// -- sometimes a full, correct mesh, sometimes nothing at all -- despite
-// draw_mesh_line()'s own loop counters (line_index, and a temporary
-// settled-sample probe logging into a ring buffer right after tick()
-// returns, not an arbitrary async cycle count -- see
-// section_polygon_workout.c's own header comment for why that distinction
-// matters) always reaching their correct final values. Deterministic
-// VRAM reads at multiple fixed cycle counts confirmed this wasn't a
-// sampling artifact: the mesh was GENUINELY absent from the framebuffer
-// at some points and genuinely present at others, for the exact same
-// code, only differing in what ELSE existed elsewhere in the whole
-// program -- another instance of this project's own well-documented
-// Oscar64 -O2 whole-program register-allocator bug class (see
-// ~/.claude/oscar64.md), this time apparently timing/interrupt-sensitive
-// (Arkos's `arkos_tick()`/`main_frame_tick_isr()` fire continuously via
-// `hrirq.h` throughout). Fixed by BOTH: (1) replacing hires.c's own
-// hb_line() with a local, `__noinline` hand-written Bresenham
-// (`draw_line_local()` below, calling hb_set()/hb_clr() directly -- the
-// same proven-safe primitives hb_rect_fill()/hb_ellipse_fill() already
-// use successfully elsewhere), and (2) bracketing every mesh
-// erase/recompute/draw pass with hrirq_stop()/hrirq_start(), matching the
-// interrupt-collision mitigation this project has used before. Verified
-// via the same settled-sample ring-buffer technique: a stable, correct
-// count on every sampled tick after both fixes, across a long soak test
-// on both targets -- see this project's own plan file (Round 6) for the
-// full investigation log.
+// Lines are drawn via a LOCAL, `__noinline` hand-written Bresenham
+// (`draw_line_local()` below, calling hb_set()/hb_clr() directly), NOT
+// hires.c's own hb_line() -- a real, confirmed Oscar64 -O2 whole-program
+// register-allocator bug made hb_line()'s own call site here render the
+// mesh correctly on SOME ticks and leave it genuinely absent on others,
+// for the exact same code, depending only on what ELSE existed elsewhere
+// in the whole program (see ~/.claude/oscar64.md for the full
+// investigation). Do not swap this back to hb_line() without re-running
+// a long soak test across both build targets first.
 //
-// Round 10 follow-up, per real user-reported audible regression: the
-// original fix above bracketed EVERY line of a whole 144-line
-// erase/redraw pass (F3D_ROTATE) or an 8-line-per-tick batch (F3D_DRAW)
-// with a SINGLE hrirq_stop()/hrirq_start() pair around the entire batch.
-// hrirq_stop()/hrirq_start() are plain SEI/CLI (rasterirq.c) -- and Timer
-// 1's hardware interrupt-pending flag is a single latched bit, not a
-// counter: however many real 100Hz timer periods elapse while SEI'd, at
-// most ONE arkos_tick() call happens once CLI'd again, so a long SEI
-// window doesn't just delay Arkos, it permanently DROPS however many
-// ticks would have fired during it. Narrowing the bracket to wrap each
-// INDIVIDUAL draw/erase/project call (not the whole batch) reduced but
-// did NOT eliminate the audible slowdown, per further user feedback --
-// F3D_ROTATE still did a full 288-operation erase+recompute+redraw pass
-// in a single main-loop tick, just with 288 tiny SEI/CLI pairs instead of
-// one big one, still adding up to real, measurable dropped-tick time.
-//
-// Round 11 follow-up: tried removing the interrupt brackets from
-// F3D_ROTATE ENTIRELY as an experiment (soak-tested + screenshot-verified
-// no corruption reappeared -- the Round 6 regression's own signature,
-// mesh randomly present/absent for the SAME code, never showed up; every
-// sample was either a clean complete mesh or a normal, explicable
-// mid-erase/mid-redraw transient). But it revealed a DIFFERENT real cost:
-// with no protection at all, Arkos's IRQ can now fire freely throughout
-// the 288-operation batch, and each individual firing adds real interrupt
-// overhead (save/dispatch/restore) ON TOP of the batch's own work --
-// confirmed via closely-spaced screenshots that the mesh sat visibly
-// blank (mid erase-to-redraw) for a MUCH longer real-time stretch than
-// before, meaning the whole batch now took far longer wall-clock time to
-// complete, not less. Neither extreme (one huge SEI window vs. no
-// protection at all around one huge batch) is a good trade -- the first
-// starves Arkos, the second makes the visual redraw itself much slower.
-//
-// The actual fix: reduce how much work is bunched into any ONE tick, the
-// same way F3D_DRAW's own build phase already paces itself
-// (LINES_PER_TICK lines per tick, not all 144 at once). F3D_ROTATE is
-// now its own small state machine (F3D_ROTATE_ERASE -> _RECOMPUTE ->
-// _DRAW -> _HOLD (added Round 14, see ROTATE_HOLD_TICKS) -> back to
-// _ERASE for the next step), each state processing only
-// ROTATE_LINES_PER_TICK lines (or, for _RECOMPUTE, GRID_SIZE cheap
-// project_row() calls) per tick instead of the full 144/9. This directly
-// answers "why do we need so much IRQ safe room" -- we don't, once no
-// single tick's own workload is large enough for the SEI time (per-line,
-// same narrow brackets as before) to add up to anything perceptible.
-// Confirmed via soak test + screenshots: the mesh now updates
-// continuously in small, steady steps every tick (reading as a
-// sweeping/wipe-style rotation rather than a periodic "jump" every few
-// ticks) with no extended blank stretches and no corruption.
-//
-// Round 13 follow-up, per explicit user request ("is there really no way
-// to draw 3d function without disabling temporarily music?"): with
-// ROTATE_LINES_PER_TICK already this small, removed the per-line
-// hrirq_stop()/hrirq_start() brackets ENTIRELY (an experiment Round 11
-// also tried, but only against the OLD large-288-line-batch design, where
-// it made the redraw itself much slower from unprotected-IRQ overhead
-// piling up across one huge batch -- never re-tested against today's
-// already-small-batched code). Re-verified via a fresh soak test against
-// TODAY's code specifically: the Round 6 mesh-corruption failure mode
-// (mesh randomly absent/garbled for the same code) did NOT reappear --
-// every sampled tick showed a clean, coherent mesh (complete, mid-erase,
-// or mid-redraw, never garbled) across the section's own rotate phase.
-// Audible/AY-register tempo impact couldn't be directly instrumented in
-// this session (no debug-symbol AY-shadow address available), but the
-// mechanism that caused the ORIGINAL audible slowdown (one huge
-// contiguous 288-line SEI window) is structurally gone regardless --
-// each tick's own interrupt-free stretch is now inherently tiny (12 lines
-// worth of erase/draw, or 9 project_row() calls), the same small unit
-// size already proven not to cause a perceptible slowdown WITH brackets,
-// so removing brackets around already-small units only ever adds a
-// little interrupt-dispatch overhead, not a new large blocking window.
-// If a future playtest ever reports func3d audio trouble again, the fix
-// is a straight revert of just this one change (put hrirq_stop()/
-// hrirq_start() back around the three ROTATE loop bodies) -- do not
-// reach for a different mitigation without re-confirming this is really
-// the section at fault first.
+// F3D_ROTATE is its own small state machine (F3D_ROTATE_ERASE ->
+// _RECOMPUTE -> _DRAW -> _HOLD -> back to _ERASE), each state processing
+// only a small, bounded amount of work per tick (ROTATE_LINES_PER_TICK
+// lines, or GRID_SIZE cheap project_row() calls) rather than the mesh's
+// full 144 lines/9 rows in one go. This keeps every tick's own workload
+// small enough that it runs safely with NO hrirq_stop()/hrirq_start()
+// interrupt brackets at all around the erase/recompute/draw calls --
+// confirmed via soak test (clean, coherent mesh on every sample, no
+// corruption) -- while still leaving Arkos's own 50Hz music tick
+// undisturbed (large single-batch designs were tried and rejected during
+// development: bracketing one huge batch drops Arkos ticks and audibly
+// slows the music, while running one huge batch fully unprotected instead
+// makes the redraw itself far slower from accumulated interrupt overhead;
+// small per-tick batches avoid both failure modes at once). If a future
+// change ever needs to increase ROTATE_LINES_PER_TICK substantially, both
+// risks above need re-checking, not just performance.
 
 #include <math.h>
 #include "oric.h"
@@ -165,16 +78,15 @@
 // Erase/draw batch size per tick during F3D_ROTATE_ERASE/_DRAW -- same
 // pacing convention as LINES_PER_TICK above, chosen to keep each tick's
 // own workload small. See this file's own header comment for the full
-// redesign rationale (this batch size is also what makes it safe to run
-// entirely without hrirq_stop()/hrirq_start() brackets, as of Round 13).
+// rationale (this batch size is also what makes it safe to run entirely
+// without hrirq_stop()/hrirq_start() brackets).
 #define ROTATE_LINES_PER_TICK 12u
 
-// Round 14 follow-up, per user feedback: the fully-drawn mesh used to be
-// erased on the VERY NEXT tick after F3D_ROTATE_DRAW completed, so the
-// complete result was barely visible at all before disappearing again.
-// F3D_ROTATE_HOLD (below) pauses there instead -- same general "admire
-// the finished shape for a moment" convention section_hires_showcase.c's
-// own PHASE_WAIT_TICKS already uses.
+// Ticks to hold the fully-drawn mesh before erasing it again -- without
+// this, F3D_ROTATE_DRAW's completed result was erased on the very next
+// tick, barely visible before disappearing. Same general "admire the
+// finished shape for a moment" convention section_hires_showcase.c's own
+// PHASE_WAIT_TICKS uses.
 #define ROTATE_HOLD_TICKS 15u
 
 #define CAPTION_Y  10u

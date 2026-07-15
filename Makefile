@@ -4,7 +4,7 @@
 #   1. Oscar64 (-n -tf=bin -rt=include/oric_crt.c) -> build/*.bin
 #   2. tools/mktap.py -> build/*.tap
 #
-# make run requires Oricutron; see ORICUTRON_HOME below
+# make run-disk/run-phos require Oricutron/Phosphoric; see ORICUTRON_HOME/PHOSDIR below
 
 # Bare 'make' must build the real tape demo (build/oricdemo.tap), per this
 # project's own documented convention (see CLAUDE.md) -- without this,
@@ -131,7 +131,6 @@ MAIN_SRCS = \
   assets/steppingout.aky \
   assets/boulesetbits.aky \
   assets/oriclogo.bin   \
-  assets/starfield.bin  \
   assets/oricatmos.bin  \
   assets/oricmag.bin    \
   assets/macaw.bin      \
@@ -161,7 +160,9 @@ MAIN_SRCS = \
   include/keyboard.c    \
   include/keyboard.h    \
   include/loci.c        \
-  include/loci.h
+  include/loci.h        \
+  include/homedir.c     \
+  include/homedir.h
 
 # -------------------------------------------------------------------------
 # Build-chain regression test (src/buildtest.c, default oric_crt.c runtime)
@@ -351,7 +352,6 @@ FLOPPY_SRCS = \
   assets/steppingout.aky   \
   assets/boulesetbits.aky  \
   assets/oriclogo.bin      \
-  assets/starfield.bin     \
   assets/oricatmos.bin     \
   assets/oricmag.bin       \
   assets/macaw.bin         \
@@ -392,7 +392,6 @@ FLOPPY_BOOTSECTOR_SRCS = tools/floppy/bootsector_microdisc.c
 FLOPPY_MUSIC_BIN = assets/steppingout.aky
 FLOPPY_LOGO_BIN = assets/oriclogo.bin
 FLOPPY_MUSIC2_BIN = assets/boulesetbits.aky
-FLOPPY_STARFIELD_BIN = assets/starfield.bin
 FLOPPY_ORICATMOS_BIN = assets/oricatmos.bin
 FLOPPY_ORICMAG_BIN = assets/oricmag.bin
 FLOPPY_MACAW_BIN = assets/macaw.bin
@@ -456,7 +455,7 @@ build/floppy_bootsector.bin: build/floppy_bootsector_compiled.bin
 # NOTE: oric_floppybuilder.py resolves script-relative paths against the
 # SCRIPT's own directory (tools/floppy/), not the caller's cwd -- so every
 # -D path here is made absolute via $(CURDIR) to sidestep that entirely.
-build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_STARFIELD_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
+build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
 	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/floppy_init.dsk \
@@ -469,7 +468,6 @@ build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_
 	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN) \
 	    -D LOGO_BIN=$(CURDIR)/$(FLOPPY_LOGO_BIN) \
 	    -D MUSIC2_BIN=$(CURDIR)/$(FLOPPY_MUSIC2_BIN) \
-	    -D STARFIELD_BIN=$(CURDIR)/$(FLOPPY_STARFIELD_BIN) \
 	    -D ORICATMOS_BIN=$(CURDIR)/$(FLOPPY_ORICATMOS_BIN) \
 	    -D ORICMAG_BIN=$(CURDIR)/$(FLOPPY_ORICMAG_BIN) \
 	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN) \
@@ -512,7 +510,7 @@ build/floppy_demo.bin: build/floppy_directory.h $(FLOPPY_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
 	    -o=build/floppy_demo.bin src/main.c
 
-build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_STARFIELD_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
+build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
 	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/oricdemo_floppy.dsk \
@@ -525,7 +523,6 @@ build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/f
 	    -D MUSIC_BIN=$(CURDIR)/$(FLOPPY_MUSIC_BIN) \
 	    -D LOGO_BIN=$(CURDIR)/$(FLOPPY_LOGO_BIN) \
 	    -D MUSIC2_BIN=$(CURDIR)/$(FLOPPY_MUSIC2_BIN) \
-	    -D STARFIELD_BIN=$(CURDIR)/$(FLOPPY_STARFIELD_BIN) \
 	    -D ORICATMOS_BIN=$(CURDIR)/$(FLOPPY_ORICATMOS_BIN) \
 	    -D ORICMAG_BIN=$(CURDIR)/$(FLOPPY_ORICMAG_BIN) \
 	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN) \
@@ -703,7 +700,7 @@ CYCLES   ?= 8000000
 # all: must appear first so it is the default goal
 # =========================================================================
 
-.PHONY: all clean run run-phos run-phos-buildtest docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
+.PHONY: all clean run-phos run-phos-buildtest docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
 
 all: build/$(MAIN).tap
 
@@ -744,16 +741,22 @@ build/$(MAIN_HIRES).tap: build/$(MAIN_HIRES).bin
 	    $(PROGNAME_HIRES) \
 	    $(LOAD_ADDR)
 
-# Launch in Oricutron (must cd to oricutron dir -- it loads ROMs from cwd).
-run: build/$(MAIN).tap
-	cd $(ORICUTRON_HOME) && \
-	    $(EMUL) $(EMUFLAG) "$(CURDIR)/build/$(MAIN).tap"
+# No plain 'make run' (Oricutron, LOCI target, no LOCI emulation) target --
+# removed deliberately, not an oversight. Oricutron has NO LOCI emulation
+# at all, so it could only ever show a silently-degraded demo (no music,
+# blank/stale pictures for every section that loads one -- graceful
+# failure, not a crash, which made the problem easy to miss). Oricutron's
+# own debugger/monitor (F2, breakpoints, cycle counter -- see
+# docs/rasterirq.md) is the one thing that tool has that Phosphoric might
+# not match feature-for-feature, but 'make run-disk' below already gives
+# access to those SAME Oricutron tools with a fully working demo (the
+# floppy target needs no LOCI at all) -- so there's no real use case left
+# that this target uniquely served.
 
-# Launch the real demo (build/$(MAIN).tap, tape/LOCI target) visually in
-# Phosphoric instead of Oricutron (fast-loads the tape, auto-runs, and
-# mounts assets/ as the LOCI flash root so arkos_load()'s "steppingout.aky"
-# resolves). Phosphoric DOES emulate real AY audio -- this is just as valid
-# a way to see/hear the real demo as Oricutron's own 'make run'.
+# Launch the real demo (build/$(MAIN).tap, LOCI target) visually in
+# Phosphoric (fast-loads the tape, auto-runs, and mounts assets/ as the
+# LOCI flash root so arkos_load()'s "steppingout.aky" resolves).
+# Phosphoric DOES emulate real AY audio AND LOCI -- the full experience.
 # Needs PHOSDIR in .env -- see check-phosphoric. Not headless: opens a real
 # emulator window; close it or Ctrl+C in the terminal to quit. Requires the
 # oric1-emu binary itself to have been built with 'make SDL2=1' in the
@@ -787,15 +790,16 @@ check-usb:
 	@test -d "$(USBPATH)" || \
 	    (echo "ERROR: USB path '$(USBPATH)' not found -- plug in USB stick and retry" && false)
 
-usb: check-usb all
+usb: check-usb all disk
 	cp build/$(MAIN).tap "$(USBPATH)/"
 	cp assets/steppingout.aky "$(USBPATH)/"
 	cp assets/boulesetbits.aky "$(USBPATH)/"
 	cp assets/oriclogo.bin "$(USBPATH)/"
-	cp assets/starfield.bin "$(USBPATH)/"
 	cp assets/oricatmos.bin "$(USBPATH)/"
 	cp assets/oricmag.bin "$(USBPATH)/"
 	cp assets/macaw.bin "$(USBPATH)/"
+	cp assets/sunset.bin "$(USBPATH)/"
+	cp build/oricdemo_floppy.dsk "$(USBPATH)/"
 	@if [ "$(IS_WSL2)" = "1" ]; then \
 	    echo "WSL2: unmounting $(USBMOUNT)..."; \
 	    sudo umount $(USBMOUNT); \
@@ -890,24 +894,37 @@ README.pdf: README.md
 	fi
 
 # -------------------------------------------------------------------------
-# Release ZIP -- same payload as 'make usb', plus the PDF README.
+# Release ZIP -- both distributions (LOCI target: .tap + all 7 assets;
+# floppy target: the single self-contained .dsk) plus the PDF README.
+# The LOCI files go under idi8b/oricdemo2026/ WITHIN the zip -- the same
+# idi8b/<ApplicationName>/ distribution convention .env.example's own
+# USBPATH documents -- so unzipping straight onto a LOCI SD card's root
+# drops them directly into the right folder, no manual reorganizing
+# needed. The floppy .dsk and README.pdf sit at the zip's top level
+# instead (they're independent of the LOCI-folder requirement -- see
+# README.md's own Installation section for why LOCI specifically needs
+# all its files together in one folder and the .dsk doesn't).
 # ZIP name: oricdemo2026_vMAJOR.MINOR.PATCH_YYYYMMDD.zip
 # -------------------------------------------------------------------------
 
-ZIPNAME = oricdemo2026_v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)_$(shell date +%Y%m%d)
+ZIPNAME    = oricdemo2026_v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)_$(shell date +%Y%m%d)
+ZIPSTAGE   = build/zipstage
+ZIPLOCIDIR = $(ZIPSTAGE)/idi8b/oricdemo2026
 
-zip: all docs
-	$(MKDIR) build 2>$(NULLDEV) ; true
-	zip -j build/$(ZIPNAME).zip \
-	    build/$(MAIN).tap \
-	    assets/steppingout.aky \
-	    assets/boulesetbits.aky \
-	    assets/oriclogo.bin \
-	    assets/starfield.bin \
-	    assets/oricatmos.bin \
-	    assets/oricmag.bin \
-	    assets/macaw.bin \
-	    README.pdf
+zip: all disk docs
+	$(RMDIR) $(ZIPSTAGE) 2>$(NULLDEV) ; true
+	$(MKDIR) $(ZIPLOCIDIR) 2>$(NULLDEV) ; true
+	cp build/$(MAIN).tap $(ZIPLOCIDIR)/
+	cp assets/steppingout.aky $(ZIPLOCIDIR)/
+	cp assets/boulesetbits.aky $(ZIPLOCIDIR)/
+	cp assets/oriclogo.bin $(ZIPLOCIDIR)/
+	cp assets/oricatmos.bin $(ZIPLOCIDIR)/
+	cp assets/oricmag.bin $(ZIPLOCIDIR)/
+	cp assets/macaw.bin $(ZIPLOCIDIR)/
+	cp assets/sunset.bin $(ZIPLOCIDIR)/
+	cp build/oricdemo_floppy.dsk $(ZIPSTAGE)/
+	cp README.pdf $(ZIPSTAGE)/
+	cd $(ZIPSTAGE) && zip -r "$(CURDIR)/build/$(ZIPNAME).zip" .
 	@echo "Created build/$(ZIPNAME).zip"
 
 # -------------------------------------------------------------------------

@@ -130,6 +130,23 @@ trusting a specific offset value:
   — dump a screenshot at varying cycle counts to see where a colour change
   visually lands.
 
+## Real usage in this demo
+
+Three callbacks stay registered for the demo's entire runtime, sharing
+the 8-slot table: `arkos_tick()` (music, `docs/arkos.md`),
+`main_frame_tick_isr()` (a one-line counter driving `src/main.c`'s own
+50Hz section-pacing loop), and `src/section_rasterirq_showcase.c`'s
+`rasterbar_isr()` (three colour bars recomputed at full 50Hz instead of
+the main loop's own ~16.7Hz pacing — see that section's own header
+comment for why this buys update RATE specifically, not intra-frame
+colour-split precision, since Oric has no live hardware colour register
+to make the latter meaningful). That section's callback is registered
+ONCE ever (guarded against re-registering on every subsequent demo loop)
+and gated by a plain `volatile bool` flag cleared unconditionally between
+every section transition — necessary because `hrirq_add()` has no
+"remove callback" primitive, so a still-armed callback would otherwise
+keep overwriting row colours forever, corrupting every later section.
+
 ## Verification
 
 `tests/scripts/test_hires.sh` (via `make test-hires`) checks two things:

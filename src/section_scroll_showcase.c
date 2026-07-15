@@ -6,10 +6,9 @@
 // vector rectangles/ellipses, no gradients/fine detail, since mono
 // conversion needs high-contrast blocky source art) and converted with
 // tools/oric_pictconv.py --mode mono --dither none. Loaded at runtime via
-// include/picture.h, same convention as section_logo.c's oriclogo.bin and
-// section_sprite_showcase.c's starfield.bin -- no separate
-// hires_row_colors() baseline needed, since the picture's own conversion
-// used the default white-ink/black-paper (--ink 7 --paper 0).
+// include/picture.h, same convention as section_logo.c's oriclogo.bin --
+// no separate hires_row_colors() baseline needed, since the picture's own
+// conversion used the default white-ink/black-paper (--ink 7 --paper 0).
 //
 // The keyboard's two accent bars (columns 6 and 29, matching the real
 // Oric Atmos keyboard's red side keys) are recoloured to Oric red via
@@ -33,7 +32,7 @@
 #include "section_scroll_showcase.h"
 
 #ifdef STORAGE_FLOPPY
-#define ORICATMOS_FILE 5
+#define ORICATMOS_FILE 4
 #else
 #define ORICATMOS_FILE "oricatmos.bin"
 #endif

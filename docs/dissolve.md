@@ -57,3 +57,15 @@ Typical use: call `hires_dissolve_next()` + `hires_dissolve_step()` some
 number of times per frame (however many pixels-per-frame the effect's
 budget allows) until the whole screen has been visited — giving a
 classic "static-like" full-screen dissolve reveal/hide effect.
+
+**Not currently used by the real demo** — only `src/hires_test.c`'s own
+test fixture exercises it (via the Makefile's `MAIN_HIRES_SRCS`), kept
+linked in purely for its own regression coverage. A real demo section
+built around exactly this technique (`src/section_dissolve_showcase.c`)
+was tried and later removed — not because of this library, but because
+the section's OWN design never actually called into it (it reimplemented
+similar techniques locally, then was redesigned twice more, and
+ultimately couldn't achieve a real two-picture crossfade within this
+project's memory budget — see `~/.claude/plans/serene-tickling-lemur.md`
+and this project's own memory notes for the full history, if resuming
+a similar effect later).

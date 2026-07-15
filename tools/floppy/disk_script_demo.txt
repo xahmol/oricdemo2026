@@ -53,27 +53,25 @@ AddDefine LOADER_LOGO_FILE {FileIndex}
 AddFile {MUSIC2_BIN}
 AddDefine LOADER_MUSIC2_FILE {FileIndex}
 
-; File index 4: assets/starfield.bin, loaded via picture_load(4)
-; (STORAGE_FLOPPY) -- see src/section_sprite_showcase.c's STARFIELD_FILE.
-AddFile {STARFIELD_BIN}
-AddDefine LOADER_STARFIELD_FILE {FileIndex}
-
-; File index 5: assets/oricatmos.bin, loaded via picture_load(5)
+; File index 4: assets/oricatmos.bin, loaded via picture_load(4)
 ; (STORAGE_FLOPPY) -- see src/section_scroll_showcase.c's ORICATMOS_FILE.
+; (File index 4 used to be assets/starfield.bin -- removed, the starfield
+; is now drawn procedurally, see src/section_sprite_showcase.c's own
+; header comment -- every index below shifted down by one accordingly.)
 AddFile {ORICATMOS_BIN}
 AddDefine LOADER_ORICATMOS_FILE {FileIndex}
 
-; File index 6: assets/oricmag.bin, loaded via picture_load(6)
+; File index 5: assets/oricmag.bin, loaded via picture_load(5)
 ; (STORAGE_FLOPPY) -- see src/section_wave_showcase.c's ORICMAG_FILE.
 AddFile {ORICMAG_BIN}
 AddDefine LOADER_ORICMAG_FILE {FileIndex}
 
-; File index 7: assets/macaw.bin, loaded via picture_load(7)
+; File index 6: assets/macaw.bin, loaded via picture_load(6)
 ; (STORAGE_FLOPPY) -- see src/section_macaw_showcase.c's MACAW_FILE.
 AddFile {MACAW_BIN}
 AddDefine LOADER_MACAW_FILE {FileIndex}
 
-; File index 8: assets/sunset.bin, loaded via picture_load(8)
+; File index 7: assets/sunset.bin, loaded via picture_load(7)
 ; (STORAGE_FLOPPY) -- see src/section_credits.c's SUNSET_FILE.
 AddFile {SUNSET_BIN}
 AddDefine LOADER_SUNSET_FILE {FileIndex}
