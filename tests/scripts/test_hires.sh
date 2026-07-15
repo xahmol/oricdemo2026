@@ -108,10 +108,13 @@ else
     # 0x7c, at $A3ED.
     check_byte "hb_circle_fill (\$A3ED)" "0xA3ED:1" "7c" "$DUMP"
 
-    # hb_triangle_fill test: triangle (10,30)-(20,30)-(15,35) -- at row 32
-    # the inside span is exactly x=12-17 (column-byte 2, hand-verified),
-    # giving the canonical all-ink byte 0x7f, at $A502.
-    check_byte "hb_triangle_fill (\$A502)" "0xA502:1" "7f" "$DUMP"
+    # Filled-triangle test (hb_line() outline + hb_flood_fill(), the
+    # recommended pattern replacing hb_polygon_fill()/hb_triangle_fill()
+    # -- see hires.h's own header comment): triangle (10,30)-(20,30)-
+    # (15,35) -- at row 32 the inside span is exactly x=12-17
+    # (column-byte 2, hand-verified), giving the canonical all-ink byte
+    # 0x7f, at $A502.
+    check_byte "triangle outline+flood_fill (\$A502)" "0xA502:1" "7f" "$DUMP"
 
     # hb_bitblit test: source byte 0x68 (bits at x=12,14) at row 34 col-byte
     # 2 ($A552), copied to row 36 col-byte 2 ($A5A2) -- destination should

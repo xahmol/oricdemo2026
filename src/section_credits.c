@@ -1,26 +1,29 @@
 // section_credits.c - see section_credits.h.
 //
-// assets/sunset.bin: "Sunset reflection with clouds" by CupcakePerson13
-// (commons.wikimedia.org/wiki/File:Sunset_reflection_with_clouds.jpg),
-// CC BY-SA 4.0, converted with tools/oric_pictconv.py --mode aic
-// --dither ordered -- picked (over several other CC-licensed sunset/
-// landscape photos tried) for its large, clean tree-silhouette/sky/water-
-// reflection composition, which held up far better under 1-bit ordered
-// dithering than busier options (fine sand/water-ripple texture in other
-// candidates dithered into noisy static at this resolution). Matches the
-// original "sunset over the creek" credits backdrop from this project's
-// own planning notes, using a real converted photo rather than hand-drawn
-// art per explicit user direction for this section.
+// assets/sunset.bin: "Silhouette of palm trees at tropical sunset on Bali
+// island" by Artem Beliaikin (Moscow, Russia)
+// (commons.wikimedia.org/wiki/File:Silhouette_of_palm_trees_at_tropical_sunset_on_Bali_island._(44817340244).jpg),
+// CC0 1.0 Universal Public Domain Dedication, converted with
+// tools/oric_pictconv.py --mode pictoric --dither ordered -- the SAME
+// technique section_macaw_showcase.c's own photo already uses for real
+// multi-colour output (genuine reds/cyans/magentas/greens across the sky
+// gradient and palm silhouettes), picked after an earlier `aic`-mode
+// sunset/water-reflection photo read as too monochrome (only ever
+// alternates between 2 fixed hues, one per row parity) per explicit user
+// feedback wanting "a more colourful" backdrop -- `colored` mode was also
+// tried on both candidate photos and produced broken/garbled output for
+// this kind of continuous-gradient sky content (works far better on bold
+// solid-colour-block sources, per macaw.bin's own header comment); only
+// `pictoric` gave genuinely rich colour here.
 //
 // TAGLINE_Y/CAPTION_BAND_*: assets/sunset.bin is letterboxed by
 // tools/oric_pictconv.py's load_and_fit() (240x200, aspect-preserving) --
-// a direct byte scan found real picture content only spans roughly
-// y=33-159; y=0-32 and y=160-199 are genuinely blank (uniform black
-// paper, zero pixel bits set). The scroller band sits well inside the
-// bottom blank margin, same "picture's own real blank margin, not a
-// guess" diligence as section_macaw_showcase.c/section_scroll_showcase.c
-// (both fixed a real bug earlier this project for placing a scroller
-// band over busy picture content instead).
+// a direct byte scan found real picture content spans roughly y=0-180;
+// y=182-199 is genuinely blank (uniform 0x40 bytes). The scroller band
+// sits inside that bottom blank margin, same "picture's own real blank
+// margin, not a guess" diligence as section_macaw_showcase.c/
+// section_scroll_showcase.c (both fixed a real bug earlier this project
+// for placing a scroller band over busy picture content instead).
 
 #include "oric.h"
 #include "hires.h"

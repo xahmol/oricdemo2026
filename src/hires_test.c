@@ -100,13 +100,21 @@ int main(void)
     *(volatile uint8_t *)(HIRESVRAM + 0x3ED) = 0x40;
     hb_circle_fill(&hb, (const HiresClip *)0, 30, 25, 3, true);
 
-    // hb_triangle_fill test: triangle (10,30)-(20,30)-(15,35). At row 32,
-    // the even-odd edge test gives an inside span of exactly x=12..17 --
-    // all 6 pixels of column-byte 2 -- so that byte becomes the canonical
-    // all-ink 0x7F, at hires_row_off[32]+2 == $A502 (hand-verified when
-    // this test was written -- see task notes).
+    // Filled-triangle test: (10,30)-(20,30)-(15,35), via the RECOMMENDED
+    // hb_line() outline + hb_flood_fill() pattern (see hires.h's own
+    // header comment for why there's no general hb_polygon_fill()/
+    // hb_triangle_fill() anymore). Seed (15,32) is the triangle's own
+    // centroid-ish interior point. At row 32, the same triangle gives an
+    // inside span of exactly x=12..17 -- all 6 pixels of column-byte 2 --
+    // so that byte becomes the canonical all-ink 0x7F, at
+    // hires_row_off[32]+2 == $A502 (hand-verified when this test was
+    // originally written against hb_triangle_fill() -- same triangle,
+    // same expected result, only the fill MECHANISM changed).
     *(volatile uint8_t *)(HIRESVRAM + 0x502) = 0x40;
-    hb_triangle_fill(&hb, (const HiresClip *)0, 10, 30, 20, 30, 15, 35, true);
+    hb_line(&hb, (const HiresClip *)0, 10, 30, 20, 30, true);
+    hb_line(&hb, (const HiresClip *)0, 20, 30, 15, 35, true);
+    hb_line(&hb, (const HiresClip *)0, 15, 35, 10, 30, true);
+    hb_flood_fill(&hb, (const HiresClip *)0, 15, 32, true);
 
     // hb_bitblit test: build a source byte at row 34 col-byte 2 (x=12-17)
     // with bits at x=12 and x=14 set (0x40|0x20|0x08=0x68), then copy 6x1

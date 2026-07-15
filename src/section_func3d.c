@@ -102,12 +102,38 @@
 // continuously in small, steady steps every tick (reading as a
 // sweeping/wipe-style rotation rather than a periodic "jump" every few
 // ticks) with no extended blank stretches and no corruption.
+//
+// Round 13 follow-up, per explicit user request ("is there really no way
+// to draw 3d function without disabling temporarily music?"): with
+// ROTATE_LINES_PER_TICK already this small, removed the per-line
+// hrirq_stop()/hrirq_start() brackets ENTIRELY (an experiment Round 11
+// also tried, but only against the OLD large-288-line-batch design, where
+// it made the redraw itself much slower from unprotected-IRQ overhead
+// piling up across one huge batch -- never re-tested against today's
+// already-small-batched code). Re-verified via a fresh soak test against
+// TODAY's code specifically: the Round 6 mesh-corruption failure mode
+// (mesh randomly absent/garbled for the same code) did NOT reappear --
+// every sampled tick showed a clean, coherent mesh (complete, mid-erase,
+// or mid-redraw, never garbled) across the section's own rotate phase.
+// Audible/AY-register tempo impact couldn't be directly instrumented in
+// this session (no debug-symbol AY-shadow address available), but the
+// mechanism that caused the ORIGINAL audible slowdown (one huge
+// contiguous 288-line SEI window) is structurally gone regardless --
+// each tick's own interrupt-free stretch is now inherently tiny (12 lines
+// worth of erase/draw, or 9 project_row() calls), the same small unit
+// size already proven not to cause a perceptible slowdown WITH brackets,
+// so removing brackets around already-small units only ever adds a
+// little interrupt-dispatch overhead, not a new large blocking window.
+// If a future playtest ever reports func3d audio trouble again, the fix
+// is a straight revert of just this one change (put hrirq_stop()/
+// hrirq_start() back around the three ROTATE loop bodies) -- do not
+// reach for a different mitigation without re-confirming this is really
+// the section at fault first.
 
 #include <math.h>
 #include "oric.h"
 #include "hires.h"
 #include "vector3d.h"
-#include "rasterirq.h"
 #include "section_func3d.h"
 
 #define GRID_SIZE   9u
@@ -136,10 +162,10 @@
 // in the same ballpark, not slower just because of the redesign.
 #define ROTATE_STEP     0.20f
 // Erase/draw batch size per tick during F3D_ROTATE_ERASE/_DRAW -- same
-// pacing convention as LINES_PER_TICK above, chosen so no single tick's
-// own hrirq_stop()/hrirq_start() bracket count (this many small per-line
-// brackets) adds up to a perceptible amount of dropped Arkos ticks. See
-// this file's own header comment for the full redesign rationale.
+// pacing convention as LINES_PER_TICK above, chosen to keep each tick's
+// own workload small. See this file's own header comment for the full
+// redesign rationale (this batch size is also what makes it safe to run
+// entirely without hrirq_stop()/hrirq_start() brackets, as of Round 13).
 #define ROTATE_LINES_PER_TICK 12u
 
 #define CAPTION_Y  10u
@@ -334,9 +360,7 @@ void section_func3d_tick(const HiresBitmap *screen)
         uint16_t n;
         for (n = 0; n < ROTATE_LINES_PER_TICK && line_index < TOTAL_LINES; n++, line_index++)
         {
-            hrirq_stop();
             draw_mesh_line(screen, line_index, false);   // erase the OLD mesh
-            hrirq_start();
         }
         if (line_index >= TOTAL_LINES)
             state = F3D_ROTATE_RECOMPUTE;
@@ -350,9 +374,7 @@ void section_func3d_tick(const HiresBitmap *screen)
         build_transform(&cur_xform, rot_y);
         for (iy = 0; iy < GRID_SIZE; iy++)
         {
-            hrirq_stop();
             project_row(iy);
-            hrirq_start();
         }
         line_index = 0;
         state = F3D_ROTATE_DRAW;
@@ -364,9 +386,7 @@ void section_func3d_tick(const HiresBitmap *screen)
         uint16_t n;
         for (n = 0; n < ROTATE_LINES_PER_TICK && line_index < TOTAL_LINES; n++, line_index++)
         {
-            hrirq_stop();
             draw_mesh_line(screen, line_index, true);    // draw the NEW mesh
-            hrirq_start();
         }
         if (line_index >= TOTAL_LINES)
         {

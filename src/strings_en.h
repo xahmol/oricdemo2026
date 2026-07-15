@@ -23,7 +23,7 @@
 #define MSG_CREDIT_MUSIC2   "music: Tom & Jerry - Boules Et Bits...."
 #define MSG_CREDIT_BIRD     "bird sprite: mihai-dragan / oric_BAS (MIT)...."
 #define MSG_CREDIT_LOGO     "Oric Atmos logo: Oric International / Wikimedia Commons...."
-#define MSG_CREDIT_SUNSET   "sunset photo: CupcakePerson13, Wikimedia Commons, CC BY-SA 4.0...."
+#define MSG_CREDIT_SUNSET   "sunset photo: Artem Beliaikin, Wikimedia Commons, CC0...."
 #define MSG_CREDIT_THANKS   "thanks for watching!...."
 
 #endif // STRINGS_EN_H

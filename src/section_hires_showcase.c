@@ -6,13 +6,39 @@
 // ink-bracket collision (every band's shape never shares a row with any
 // other band's shape):
 //   - y  5- 50 (green):   hb_ellipse_fill()
-//   - y 52-102 (cyan):    hb_polygon_fill() -- a 10-vertex star
+//   - y 52-102 (cyan):    a 10-vertex star, hb_line() outline + a single
+//     hb_flood_fill() from its own centroid (120,77) -- NOT
+//     hb_polygon_fill() (tried first; see below), demonstrating
+//     flood_fill() a second time here alongside the ring's own use below.
 //   - y104-144 (red):     hb_rect_pattern() -- a diagonal hatch tile
 //   - y146-196 (magenta): hb_circle_fill() x2 (a ring: solid disc, then a
 //     smaller disc punched out of its centre) followed by hb_flood_fill()
 //     re-filling that punched-out centre -- demonstrates flood_fill()
 //     specifically (paint-bucket filling a bounded blank region), not
 //     just another filled shape.
+//
+// The star used hb_polygon_fill() originally, matching Oscar64's own
+// hires sample this section is loosely modelled on. Switched away from it
+// (2026-07-15, alongside a similar fix in src/section_rasterirq_showcase.c)
+// after discovering hb_polygon_fill()'s own per-pixel x per-edge
+// point-in-polygon test (hires.c's _hb_point_in_polygon(), which runs a
+// DIVISION per edge per pixel) takes several real SECONDS to fill a shape
+// this size on a 1MHz 6502 -- confirmed via Phosphoric frame-dumps showing
+// the star visibly growing over that whole time, not an instant fill, at
+// this exact call site (PHASE_WAIT_TICKS=15, ~1.1s, is nowhere near long
+// enough to cover it -- the fill call itself blocks for far longer than
+// that before the state machine even gets to advance). hb_polygon_fill()
+// SEPARATELY also has a real, documented, unresolved Oscar64 -O2
+// whole-program register-allocator bug at SOME call sites (silently drops
+// most of its fill loop's iterations -- see ~/.claude/oscar64.md's "Third
+// symptom shape" entry, 2026-07-12) that resisted every previously-tried
+// fix; this project's own established response to that (see
+// section_polygon_workout.c's/section_background.c's own header comments)
+// is to route around the function entirely rather than keep debugging it
+// -- the same call here. hb_line()+hb_flood_fill() has neither problem:
+// flood_fill is a scanline-stack algorithm with no per-pixel division (see
+// hires.c's own header comment on it), and it was already linked into
+// this exact file for the ring effect below.
 //
 // Used to hand off the demo's music track here (a ONE-TIME hardcoded
 // switch to assets/boulesetbits.aky, the first section past the original
@@ -50,6 +76,11 @@
 
 static const uint8_t star_xs[10] = { 120, 129, 153, 134, 141, 120, 99, 106, 87, 111 };
 static const uint8_t star_ys[10] = {  52,  69,  69,  80,  97,  88, 97,  80, 69,  69 };
+// Centroid of the 10 vertices above -- a valid hb_flood_fill() seed for
+// this specific (star-shaped, symmetric) polygon; see this file's own
+// header comment for why this replaced hb_polygon_fill().
+#define STAR_CENTER_X 120u
+#define STAR_CENTER_Y  77u
 
 static const uint8_t hatch_pattern[8] = {
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
@@ -108,8 +139,13 @@ void section_hires_showcase_tick(const HiresBitmap *screen)
 
     case SHOW_STAR:
     {
-        uint8_t y;
-        hb_polygon_fill(screen, (const HiresClip *)0, star_xs, star_ys, 10, true);
+        uint8_t y, i;
+        for (i = 0; i < 10; i++)
+        {
+            uint8_t j = (uint8_t)((i + 1u) % 10u);
+            hb_line(screen, (const HiresClip *)0, star_xs[i], star_ys[i], star_xs[j], star_ys[j], true);
+        }
+        hb_flood_fill(screen, (const HiresClip *)0, STAR_CENTER_X, STAR_CENTER_Y, true);
         for (y = 52; y <= 102; y++)
             hires_row_colors(y, A_FWCYAN, A_BGBLACK);
         state = SHOW_PATTERN;

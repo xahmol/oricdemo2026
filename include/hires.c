@@ -501,60 +501,12 @@ void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, ui
     hb_ellipse_fill(hb, clip, cx, cy, r, r, set);
 }
 
-// Even-odd (ray-casting) point-in-polygon test over a bounding box --
-// handles convex and simple concave polygons alike with one algorithm,
-// unlike gfx/bitmap.c's separate convex-only/non-convex routines.
-static bool _hb_point_in_polygon(const uint8_t *xs, const uint8_t *ys, uint8_t num, int16_t px, int16_t py)
-{
-    bool inside = false;
-    uint8_t j = (uint8_t)(num - 1);
-    for (uint8_t i = 0; i < num; i++)
-    {
-        int16_t xi = xs[i], yi = ys[i], xj = xs[j], yj = ys[j];
-        if ((yi > py) != (yj > py))
-        {
-            // Safe: yi != yj is guaranteed here, so no divide-by-zero.
-            long xcross = (long)(xj - xi) * (py - yi) / (yj - yi) + xi;
-            if (px < xcross)
-                inside = !inside;
-        }
-        j = i;
-    }
-    return inside;
-}
-
-void hb_polygon_fill(const HiresBitmap *hb, const HiresClip *clip, const uint8_t *xs, const uint8_t *ys, uint8_t num, bool set)
-{
-    uint8_t minx = xs[0], maxx = xs[0], miny = ys[0], maxy = ys[0];
-    for (uint8_t i = 1; i < num; i++)
-    {
-        if (xs[i] < minx) minx = xs[i];
-        if (xs[i] > maxx) maxx = xs[i];
-        if (ys[i] < miny) miny = ys[i];
-        if (ys[i] > maxy) maxy = ys[i];
-    }
-
-    for (uint8_t py = miny; py <= maxy; py++)
-    {
-        if (clip && (py < clip->top || py > clip->bottom))
-            continue;
-        for (uint8_t px = minx; px <= maxx; px++)
-        {
-            if (clip && (px < clip->left || px > clip->right))
-                continue;
-            if (_hb_point_in_polygon(xs, ys, num, px, py))
-                hb_put(hb, px, py, set);
-        }
-    }
-}
-
-void hb_triangle_fill(const HiresBitmap *hb, const HiresClip *clip,
-                       uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, bool set)
-{
-    uint8_t xs[3] = { x0, x1, x2 };
-    uint8_t ys[3] = { y0, y1, y2 };
-    hb_polygon_fill(hb, clip, xs, ys, 3, set);
-}
+// No general hb_polygon_fill()/hb_triangle_fill() here anymore -- see
+// hires.h's own header comment (where they used to be declared) for why
+// they were removed (a real, unresolved Oscar64 -O2 miscompilation risk
+// PLUS a confirmed severe performance problem, division-per-pixel) and
+// what replaced every real call site (hb_line() outline + hb_flood_fill()
+// from a known-interior seed point).
 
 // -------------------------------------------------------------------------
 // Flood fill (paint bucket) -- non-recursive scanline-stack algorithm,

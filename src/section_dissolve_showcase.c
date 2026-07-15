@@ -64,13 +64,25 @@
 #define DISSOLVE_BYTES_PER_STEP ((uint16_t)DISSOLVE_ROWS_PER_STEP * HIRES_ROW_BYTES)
 #define DISSOLVE_TOTAL_STEPS (HIRES_ROWS / DISSOLVE_ROWS_PER_STEP)
 
+// Ticks (main-loop iterations, ~60ms each -- MAIN_FRAME_PACING_TICKS in
+// main.c) to WAIT between advancing dissolve_step -- NOT more picture_load()
+// calls (that would grow total I/O, see the comment above), just more real
+// time between the SAME 20 steps. Without this, 20 steps at one per tick
+// is only ~1.2s total -- too fast to read as a flowing wipe (reported by
+// the user as "just shortly shows the [wave photo] and the [macaw], but
+// not flowing into each other"). 4 ticks/step -> ~4.8s total, a real,
+// perceptible top-down reveal.
+#define DISSOLVE_TICKS_PER_STEP 4u
+
 static uint8_t dissolve_step;
+static uint8_t step_tick_count;
 
 void section_dissolve_showcase_init(const HiresBitmap *screen)
 {
     (void)screen;
     picture_load(ORICMAG_FILE, (void *)HIRESVRAM, 8000);
     dissolve_step = 0;
+    step_tick_count = 0;
 }
 
 // void, not bool -- see section_common.h's own header comment for why.
@@ -82,6 +94,11 @@ void section_dissolve_showcase_init(const HiresBitmap *screen)
 void section_dissolve_showcase_tick(const HiresBitmap *screen)
 {
     (void)screen;
+    step_tick_count++;
+    if (step_tick_count < DISSOLVE_TICKS_PER_STEP)
+        return;
+    step_tick_count = 0;
+
     dissolve_step++;
     picture_load(MACAW_FILE, (void *)HIRESVRAM, (uint16_t)dissolve_step * DISSOLVE_BYTES_PER_STEP);
     if (dissolve_step >= DISSOLVE_TOTAL_STEPS)

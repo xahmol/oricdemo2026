@@ -283,16 +283,13 @@ See [ttf.md](ttf.md) for proportional text rendering, and
 tools/requirements.txt`) for converting a source image into an AIC-encoded
 HIRES image using this same `[parity][ink/paper]` model.
 
-## Rect / ellipse / circle / triangle / polygon / pattern fill, flood fill
+## Rect / ellipse / circle / pattern fill, flood fill
 
 ```c
 void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool set);
 void hb_rect_pattern(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t pattern[8]);
 void hb_ellipse_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t rx, uint8_t ry, bool set);
 void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t r, bool set);
-void hb_polygon_fill(const HiresBitmap *hb, const HiresClip *clip, const uint8_t *xs, const uint8_t *ys, uint8_t num, bool set);
-void hb_triangle_fill(const HiresBitmap *hb, const HiresClip *clip,
-                       uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, bool set);
 void hb_flood_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, bool set);
 ```
 
@@ -312,11 +309,33 @@ would exceed `(dx·ry)² + (dy·rx)² ≤ (rx·ry)²` (`O(rx)` per row) rather t
 a Bresenham-style incremental ellipse — simple and robust at this
 resolution. `hb_circle_fill` is a thin wrapper (`rx=ry=r`).
 
-`hb_polygon_fill` uses an even-odd (ray-casting) point-in-polygon test over
-the vertices' bounding box — handles convex **and** simple concave
-polygons with one algorithm, unlike `gfx/bitmap.c`'s separate
-convex-only/non-convex routines. `hb_triangle_fill` is a thin convenience
-wrapper over it.
+**No general polygon/triangle fill** (`hb_polygon_fill`/`hb_triangle_fill`
+were removed 2026-07-15). The original implementation used an even-odd
+(ray-casting) point-in-polygon test over the vertices' bounding box, which
+turned out to have two real problems: (1) a documented, unresolved
+Oscar64 `-O2` whole-program register-allocator bug that silently dropped
+most of its fill loop's iterations at *some* call sites, resistant to
+every previously-tried mitigation (see `~/.claude/oscar64.md`'s "Third
+symptom shape" entry); (2) even when it did run correctly, a division
+inside the innermost per-pixel loop made it take several real *seconds*
+to fill an ordinary-sized shape on this 1MHz CPU — confirmed via
+Phosphoric frame-dumps showing a star visibly growing on screen over that
+whole time, in two separate sections that both used it. Every real call
+site in this project has since moved to the pattern below, which has
+neither problem:
+
+**Recommended pattern for a filled arbitrary shape**: draw the shape's
+own closed outline via repeated `hb_line()` calls (one per edge, wrapping
+back to the first vertex), then `hb_flood_fill()` from a point known to
+be inside it (e.g. a symmetric shape's own centre/centroid). See
+`src/section_hires_showcase.c`'s `SHOW_STAR` state or
+`src/section_rasterirq_showcase.c`'s `draw_star()` for two worked
+examples (both draw a 10-vertex star this way). The one real tradeoff:
+the caller must supply a valid interior seed point themselves — not
+automatic for an arbitrary/non-convex shape the way the old point-in-
+polygon test was — but `hb_flood_fill()` itself has no per-pixel division
+at all (see below), so this is dramatically faster and carries none of
+the miscompilation history above.
 
 `hb_flood_fill` (paint bucket) is a non-recursive scanline-stack algorithm
 adapted from OSDK's

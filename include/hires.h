@@ -243,13 +243,36 @@ void hb_ellipse_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, u
 // Filled circle, centre (cx,cy), radius r -- thin wrapper over hb_ellipse_fill.
 void hb_circle_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t cx, uint8_t cy, uint8_t r, bool set);
 
-// Filled polygon (even-odd rule -- handles convex and simple concave
-// polygons alike). xs/ys are parallel arrays of num vertices.
-void hb_polygon_fill(const HiresBitmap *hb, const HiresClip *clip, const uint8_t *xs, const uint8_t *ys, uint8_t num, bool set);
-
-// Filled triangle -- convenience wrapper over hb_polygon_fill.
-void hb_triangle_fill(const HiresBitmap *hb, const HiresClip *clip,
-                       uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, bool set);
+// No general hb_polygon_fill()/hb_triangle_fill() -- REMOVED 2026-07-15.
+// hires.c's own per-pixel x per-edge point-in-polygon test had TWO real
+// problems: (1) a documented, unresolved Oscar64 -O2 whole-program
+// register-allocator bug that silently dropped most of its fill loop's
+// iterations at SOME call sites, resistant to every previously-tried fix
+// (~/.claude/oscar64.md's "Third symptom shape" entry); (2) even when it
+// DID run correctly, a division inside the innermost per-pixel loop made
+// it take several real SECONDS to fill an ordinary-sized shape on this
+// 1MHz CPU (confirmed via Phosphoric frame-dumps showing a star visibly
+// growing over that whole time, in both src/section_hires_showcase.c's
+// and src/section_rasterirq_showcase.c's own stars). Every real call site
+// in this project has since moved to the pattern below, which has
+// neither problem. If a future shape genuinely can't be flood-filled this
+// way (e.g. a seed point can't be found reliably inside it), reach for
+// hb_rect_fill()/hb_ellipse_fill() combinations first; only reintroduce a
+// general polygon fill as a last resort, and re-verify BOTH problems
+// above are actually gone before trusting it anywhere real.
+//
+// RECOMMENDED PATTERN for a filled arbitrary shape: draw the shape's own
+// closed outline via repeated hb_line() calls (one per edge, wrapping
+// back to the first vertex), then hb_flood_fill() from a point known to
+// be inside it (e.g. a symmetric shape's own centre/centroid) -- see
+// section_hires_showcase.c's SHOW_STAR state or
+// section_rasterirq_showcase.c's draw_star() for two worked examples.
+// This needs the caller to supply a valid interior seed point (not
+// automatic for an arbitrary/non-convex shape the way the old point-in-
+// polygon test was), but is dramatically faster (hb_flood_fill() is a
+// scanline-stack algorithm, no per-pixel division at all -- see its own
+// header comment in hires.c) and has none of the miscompilation history
+// above.
 
 // Flood fill (paint bucket), non-recursive scanline-stack algorithm (see
 // hires.c). If the fixed-size internal seed stack fills up, the flood
