@@ -72,3 +72,8 @@ AddDefine LOADER_ORICMAG_FILE {FileIndex}
 ; (STORAGE_FLOPPY) -- see src/section_macaw_showcase.c's MACAW_FILE.
 AddFile {MACAW_BIN}
 AddDefine LOADER_MACAW_FILE {FileIndex}
+
+; File index 8: assets/sunset.bin, loaded via picture_load(8)
+; (STORAGE_FLOPPY) -- see src/section_credits.c's SUNSET_FILE.
+AddFile {SUNSET_BIN}
+AddDefine LOADER_SUNSET_FILE {FileIndex}

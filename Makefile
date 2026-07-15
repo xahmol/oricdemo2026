@@ -113,6 +113,10 @@ MAIN_SRCS = \
   src/section_dissolve_showcase.h \
   src/section_macaw_showcase.c \
   src/section_macaw_showcase.h \
+  src/section_rasterirq_showcase.c \
+  src/section_rasterirq_showcase.h \
+  src/section_credits.c \
+  src/section_credits.h \
   src/section_common.h  \
   src/section_background.c \
   src/section_background.h \
@@ -331,6 +335,10 @@ FLOPPY_SRCS = \
   src/section_dissolve_showcase.h \
   src/section_macaw_showcase.c \
   src/section_macaw_showcase.h \
+  src/section_rasterirq_showcase.c \
+  src/section_rasterirq_showcase.h \
+  src/section_credits.c \
+  src/section_credits.h \
   src/section_common.h  \
   src/section_background.c \
   src/section_background.h \
@@ -392,6 +400,7 @@ FLOPPY_STARFIELD_BIN = assets/starfield.bin
 FLOPPY_ORICATMOS_BIN = assets/oricatmos.bin
 FLOPPY_ORICMAG_BIN = assets/oricmag.bin
 FLOPPY_MACAW_BIN = assets/macaw.bin
+FLOPPY_SUNSET_BIN = assets/sunset.bin
 
 # -------------------------------------------------------------------------
 # Two-pass build (see docs/floppy.md):
@@ -451,7 +460,7 @@ build/floppy_bootsector.bin: build/floppy_bootsector_compiled.bin
 # NOTE: oric_floppybuilder.py resolves script-relative paths against the
 # SCRIPT's own directory (tools/floppy/), not the caller's cwd -- so every
 # -D path here is made absolute via $(CURDIR) to sidestep that entirely.
-build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_STARFIELD_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN)
+build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_STARFIELD_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
 	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/floppy_init.dsk \
@@ -467,7 +476,8 @@ build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_
 	    -D STARFIELD_BIN=$(CURDIR)/$(FLOPPY_STARFIELD_BIN) \
 	    -D ORICATMOS_BIN=$(CURDIR)/$(FLOPPY_ORICATMOS_BIN) \
 	    -D ORICMAG_BIN=$(CURDIR)/$(FLOPPY_ORICMAG_BIN) \
-	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN)
+	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN) \
+	    -D SUNSET_BIN=$(CURDIR)/$(FLOPPY_SUNSET_BIN)
 
 # Real values, parsed out of the generated header by the shell (make has
 # no built-in way to read a C #define -- this is simpler than teaching
@@ -506,7 +516,7 @@ build/floppy_demo.bin: build/floppy_directory.h $(FLOPPY_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
 	    -o=build/floppy_demo.bin src/main.c
 
-build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_STARFIELD_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN)
+build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_STARFIELD_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
 	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/oricdemo_floppy.dsk \
@@ -522,7 +532,8 @@ build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/f
 	    -D STARFIELD_BIN=$(CURDIR)/$(FLOPPY_STARFIELD_BIN) \
 	    -D ORICATMOS_BIN=$(CURDIR)/$(FLOPPY_ORICATMOS_BIN) \
 	    -D ORICMAG_BIN=$(CURDIR)/$(FLOPPY_ORICMAG_BIN) \
-	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN)
+	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN) \
+	    -D SUNSET_BIN=$(CURDIR)/$(FLOPPY_SUNSET_BIN)
 
 disk: build/oricdemo_floppy.dsk
 

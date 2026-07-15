@@ -27,6 +27,8 @@
 #include "section_wave_showcase.h"
 #include "section_dissolve_showcase.h"
 #include "section_macaw_showcase.h"
+#include "section_rasterirq_showcase.h"
+#include "section_credits.h"
 #include "section_common.h"
 #include "rom_charset.h"
 #include "idi8b_altcharset.h"
@@ -271,6 +273,13 @@ static void transition_clear(const HiresBitmap *screen)
 {
     uint8_t col;
 
+    // Disarms section_rasterirq_showcase.c's own __interrupt callback
+    // FIRST, before this sweep writes a single byte -- see that section's
+    // own header comment for why an armed callback must not survive past
+    // its own section (hrirq_add() has no "remove" primitive). A no-op
+    // for every other section transition (the flag is already false).
+    section_rasterirq_showcase_deactivate();
+
     for (col = 0; col < TRANSITION_TOTAL_COLS; col = (uint8_t)(col + TRANSITION_COLS_PER_TICK))
     {
         uint8_t start_tick = main_frame_tick;
@@ -422,6 +431,24 @@ static void bird_scene_tick(const HiresBitmap *screen)
 #define MACAW_SHOWCASE_MIN_TICKS  6u
 #define MACAW_SHOWCASE_MAX_TICKS 200u
 
+// Raster IRQ showcase: has a real natural end (4 full top-to-bottom bar
+// passes, see section_rasterirq_showcase.c's own TOTAL_PASSES) -- max_ticks
+// is a generous safety backstop (4 passes * HIRES_ROWS firings / 3 raster
+// ticks per main-loop iteration is ~267 iterations), should rarely fire.
+#define RASTERIRQ_SHOWCASE_MIN_TICKS  6u
+#define RASTERIRQ_SHOWCASE_MAX_TICKS 350u
+
+// Credits: has a real natural end (every MSG_CREDIT_* line has scrolled
+// fully off screen, see section_credits.c's own credit_lines[]/
+// NUM_CREDIT_LINES) -- max_ticks is a generous safety backstop, sized
+// well above the natural completion estimate (~1050 main-loop iterations
+// for 12 lines at this scroller speed), should rarely fire. This is the
+// LAST section -- main()'s own outer for(;;) loop below already cycles
+// back to the idi8b splash once this finishes, no special "press key to
+// exit" handling needed.
+#define CREDITS_MIN_TICKS   6u
+#define CREDITS_MAX_TICKS 1200u
+
 // The demo's own running order -- currently the idi8b splash, the Oric
 // logo/raster-bar intro, the bird scene, and the HIRES shapes showcase;
 // later phases insert the remaining showcase sections/credits after (see
@@ -438,6 +465,8 @@ static const DemoSection sections[] = {
     { section_wave_showcase_init, section_wave_showcase_tick, WAVE_SHOWCASE_MIN_TICKS, WAVE_SHOWCASE_MAX_TICKS },
     { section_dissolve_showcase_init, section_dissolve_showcase_tick, DISSOLVE_SHOWCASE_MIN_TICKS, DISSOLVE_SHOWCASE_MAX_TICKS },
     { section_macaw_showcase_init, section_macaw_showcase_tick, MACAW_SHOWCASE_MIN_TICKS, MACAW_SHOWCASE_MAX_TICKS },
+    { section_rasterirq_showcase_init, section_rasterirq_showcase_tick, RASTERIRQ_SHOWCASE_MIN_TICKS, RASTERIRQ_SHOWCASE_MAX_TICKS },
+    { section_credits_init, section_credits_tick, CREDITS_MIN_TICKS, CREDITS_MAX_TICKS },
 };
 #define NUM_SECTIONS (sizeof(sections) / sizeof(sections[0]))
 
