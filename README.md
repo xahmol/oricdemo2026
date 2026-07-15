@@ -28,6 +28,16 @@ Both play the full demo end-to-end, with real AY-3-8912 music
 just want to watch/listen without any real or emulated LOCI hardware,
 the floppy image is the simpler option.**
 
+## Table of contents
+
+- [The demo](#the-demo)
+- [Installation](#installation)
+  - [Floppy disk (simplest — no LOCI needed)](#floppy-disk-simplest--no-loci-needed)
+  - [LOCI](#loci)
+- [Building from source](#building-from-source)
+- [Credits](#credits)
+- [Changelog](#changelog)
+
 ## The demo
 
 In running order:
