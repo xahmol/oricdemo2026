@@ -41,6 +41,20 @@
 // would need a real off-screen staging buffer this project doesn't have
 // spare RAM for). A top-down wipe is the achievable middle ground: a
 // real picture-to-picture transition, at zero extra RAM cost.
+//
+// Round 14 follow-up, per real user-reported feedback: even after the
+// pacing fix above, macaw.bin's own picture "quickly shown, disappears,
+// and appears again" right after this section finished. Root cause:
+// main.c's own per-section loop unconditionally ran transition_clear()
+// (a generic wipe-to-blank) right after THIS section's natural end, which
+// had just finished showing macaw.bin FULLY -- erasing it again, only
+// for section_macaw_showcase_init() to reload the EXACT SAME picture data
+// a moment later. That "wipe away what was just revealed, then instantly
+// reload it" sequence is exactly what read as a flash/disappear/reappear.
+// Fixed in main.c: this section's own sections[] table entry now sets
+// skip_transition_after=true, since this is the one section boundary
+// where the next section's own starting content is GUARANTEED identical
+// to what this one already left on screen -- no wipe needed at all.
 
 #include "oric.h"
 #include "hires.h"

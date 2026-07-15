@@ -92,7 +92,8 @@
 // same way F3D_DRAW's own build phase already paces itself
 // (LINES_PER_TICK lines per tick, not all 144 at once). F3D_ROTATE is
 // now its own small state machine (F3D_ROTATE_ERASE -> _RECOMPUTE ->
-// _DRAW -> back to _ERASE for the next step), each state processing only
+// _DRAW -> _HOLD (added Round 14, see ROTATE_HOLD_TICKS) -> back to
+// _ERASE for the next step), each state processing only
 // ROTATE_LINES_PER_TICK lines (or, for _RECOMPUTE, GRID_SIZE cheap
 // project_row() calls) per tick instead of the full 144/9. This directly
 // answers "why do we need so much IRQ safe room" -- we don't, once no
@@ -168,6 +169,14 @@
 // entirely without hrirq_stop()/hrirq_start() brackets, as of Round 13).
 #define ROTATE_LINES_PER_TICK 12u
 
+// Round 14 follow-up, per user feedback: the fully-drawn mesh used to be
+// erased on the VERY NEXT tick after F3D_ROTATE_DRAW completed, so the
+// complete result was barely visible at all before disappearing again.
+// F3D_ROTATE_HOLD (below) pauses there instead -- same general "admire
+// the finished shape for a moment" convention section_hires_showcase.c's
+// own PHASE_WAIT_TICKS already uses.
+#define ROTATE_HOLD_TICKS 15u
+
 #define CAPTION_Y  10u
 #define CAPTION_H   8u
 #define CAPTION_X  12u   // skip column-bytes 0-1 (12px) -- see hires_row_colors()'s own baseline ink/paper attribute bytes
@@ -181,10 +190,12 @@ static Matrix4 cur_xform;   // pmat * current rotation, recomputed each time rot
 static float   rot_y;
 
 typedef enum { F3D_PREPARE, F3D_PROJECT, F3D_DRAW,
-               F3D_ROTATE_ERASE, F3D_ROTATE_RECOMPUTE, F3D_ROTATE_DRAW } F3DState;
+               F3D_ROTATE_ERASE, F3D_ROTATE_RECOMPUTE, F3D_ROTATE_DRAW,
+               F3D_ROTATE_HOLD } F3DState;
 static F3DState state;
 static uint8_t  row_index;
 static uint16_t line_index;
+static uint8_t  hold_count;
 
 __noinline static void compute_row(uint8_t iy)
 {
@@ -390,10 +401,19 @@ void section_func3d_tick(const HiresBitmap *screen)
         }
         if (line_index >= TOTAL_LINES)
         {
+            hold_count = 0;
+            state = F3D_ROTATE_HOLD;
+        }
+        break;
+    }
+
+    case F3D_ROTATE_HOLD:
+        hold_count++;
+        if (hold_count >= ROTATE_HOLD_TICKS)
+        {
             line_index = 0;
             state = F3D_ROTATE_ERASE;
         }
         break;
-    }
     }
 }
