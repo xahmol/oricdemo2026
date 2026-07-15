@@ -211,3 +211,8 @@ reference (every `make` target, both runtimes, test fixtures) and
 
 Every external asset's exact source/license is also credited in a header
 comment at its own point of use in `src/`.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) — this is version 1.0.0, the initial
+public release.
