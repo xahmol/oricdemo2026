@@ -33,39 +33,62 @@ the floppy image is the simpler option.**
 In running order:
 
 1. **idi8b splash** — a per-cell dissolve-in/out brand wordmark.
+
    ![idi8b splash](screenshots/01_splash.png)
+
 2. **Oric logo + raster bars** — the ORIC ATMOS 48K wordmark with two
    rotating, colour-cycling highlight bars sweeping behind/in front of it.
+
    ![Oric logo + raster bars](screenshots/02_logo.png)
+
 3. **Bird scene** — a parallax sky/creek backdrop with clouds and an
    animated bird flying a sine-wave path (a direct nod to the original
    1985 demo's own animated bird).
+
    ![Bird scene](screenshots/03_birdscene.png)
+
 4. **HIRES shapes showcase** — ellipse, star (outline + flood-fill),
    pattern-fill, and flood-fill primitives, one at a time.
+
    ![HIRES shapes showcase](screenshots/04_hiresshapes.png)
+
 5. **Polygon workout** — a continuously rotating, pulsing wireframe star.
+
    ![Polygon workout](screenshots/05_polygonworkout.png)
+
 6. **3D function surface** — a rotating wireframe height-field mesh,
    projected through a real 3D camera pipeline.
+
    ![3D function surface](screenshots/06_func3d.png)
+
 7. **Sprite showcase** — a satellite sprite drifting over a procedurally
    generated, independently-scrolling starfield.
+
    ![Sprite showcase](screenshots/07_spriteshowcase.png)
+
 8. **Scroll showcase** — a byte-aligned hardware-charset text scroller
    over a hand-illustrated Oric Atmos desk scene.
+
    ![Scroll showcase](screenshots/08_scrollshowcase.png)
+
 9. **Wave showcase** — a vintage magazine photo, sine-distorted in place.
+
    ![Wave showcase](screenshots/09_waveshowcase.png)
+
 10. **Macaw showcase** — a full-colour scarlet macaw photograph with a
     scrolling caption.
+
     ![Macaw showcase](screenshots/10_macawshowcase.png)
+
 11. **Raster IRQ showcase** — three full-screen colour bars, each driven
     directly from a 50Hz hardware interrupt, sweeping over three
     procedurally-drawn stars (filled, outline, and hatched).
+
     ![Raster IRQ showcase](screenshots/11_rasterirqshowcase.png)
+
 12. **Credits** — a longer-form scroll over a converted sunset photograph,
     crediting the tools, music, and source material used throughout.
+
     ![Credits](screenshots/12_credits.png)
 
 Two music tracks (Arkos Tracker `.aky` modules) alternate automatically

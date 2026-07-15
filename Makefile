@@ -883,12 +883,20 @@ test-hires: check-phosphoric sandbox-reset-hires
 # -------------------------------------------------------------------------
 # Documentation -- generate PDF from Markdown (requires pandoc)
 # -------------------------------------------------------------------------
+#
+# --listings + breaklines wraps long fenced-code-block lines (the "Building
+# from source" make-target listing) instead of letting them overflow the PDF
+# page as an unbroken Overfull \hbox -- a plain pandoc invocation without
+# this reliably produced ~10 Overfull \hbox warnings from that one code
+# block. (An earlier attempt to fix this via hyperref's breaklinks option
+# was a dead end -- verified side-by-side to make no difference at all;
+# the code block's long lines, not link text, were the real cause.)
 
 docs: README.pdf
 
 README.pdf: README.md
 	@if which pandoc >/dev/null 2>&1; then \
-	    pandoc README.md -o README.pdf; \
+	    pandoc README.md -o README.pdf --listings -V header-includes='\lstset{breaklines=true,basicstyle=\ttfamily\small}'; \
 	else \
 	    echo "WARNING: pandoc not found -- README.pdf not updated (install: sudo apt install pandoc texlive-xetex)"; \
 	fi
