@@ -171,13 +171,33 @@ void section_background_run(const HiresBitmap *screen)
     }
 
     // Colour -- LAST, so it isn't clobbered by any of the pixel-content
-    // drawing above.
+    // drawing above. PAPER goes at column-byte 0, INK at column-byte 1 --
+    // the reverse of hires_row_colors()'s own ink-then-paper order (see
+    // that function's own header comment) -- because the ULA resets to
+    // hardware-default black paper at the start of every scanline, before
+    // it has scanned any attribute byte on that line: whichever attribute
+    // occupies column-byte 0 renders against whatever paper is active at
+    // THAT exact position, so it must be the paper-setting byte itself for
+    // column 0 to show the real sky/bank/river colour instead of a stray
+    // black stripe. Column-byte 1 (ink) then renders correctly too, since
+    // paper is already active by then. Both bytes are still written (not
+    // just the paper one) to keep clobbering whatever stray pixel content
+    // the wavy river line above may have left in columns 0-1 for some rows.
     for (y = 0; y < BANK_TOP; y++)
-        hires_row_colors(y, A_FWWHITE, SKY_PAPER);
+    {
+        hires_put_paper(0, y, SKY_PAPER);
+        hires_put_ink(1, y, A_FWWHITE);
+    }
     for (y = BANK_TOP; y < RIVER_TOP; y++)
-        hires_row_colors(y, A_FWWHITE, BANK_PAPER);
+    {
+        hires_put_paper(0, y, BANK_PAPER);
+        hires_put_ink(1, y, A_FWWHITE);
+    }
     for (y = RIVER_TOP; y < HIRES_ROWS; y++)
-        hires_row_colors(y, A_FWWHITE, RIVER_PAPER);
+    {
+        hires_put_paper(0, y, RIVER_PAPER);
+        hires_put_ink(1, y, A_FWWHITE);
+    }
 
     // Tree ink brackets -- AFTER the baseline sweep above, or it would
     // simply overwrite these (see draw_tree_ink()'s own comment).

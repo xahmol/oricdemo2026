@@ -242,14 +242,21 @@ static void run_section(const DemoSection *section, const HiresBitmap *screen)
 // same convention hb_fill(screen, 0x40) and hb_set()/hb_clr() already use
 // (see hires.c's own header comment on that bit).
 //
-// The sweep also blanks column-bytes 0-1 of every row -- the row's own
+// The sweep blanks column-bytes 0-1 of every row -- the row's own
 // ink/paper CONTROL bytes, not ordinary pixel data (see hires.h's own
 // comment on why those two columns are special) -- exactly like every
 // section's own hb_fill(screen, 0x40) already does before it calls
-// hires_row_colors() to re-assert real values. hires_row_colors_range()
-// below does exactly that re-assertion, once, after the sweep completes,
-// resetting the whole screen to a plain white-ink/black-paper baseline so
-// the next section's own init starts from a known-clean state.
+// hires_row_colors() to re-assert real values. The re-assertion below
+// only happens ONCE, after the entire sweep completes -- which is why the
+// sweep runs RIGHT TO LEFT (high column down to 0), not left to right:
+// columns 0-1 must be the LAST thing this loop touches. An earlier
+// left-to-right version blanked every row's attribute bytes on its very
+// first tick, leaving the ULA with no attribute state to fall back on but
+// its per-scanline hardware default (white ink/black paper) for the
+// remaining ~9 ticks -- so the still-unwiped remainder of the outgoing
+// scene flashed to white-on-black for the rest of the transition. Sweeping
+// right-to-left instead means every not-yet-wiped column keeps its real
+// colours until there's no real content left to protect.
 #define TRANSITION_COLS_PER_TICK 4u
 #define TRANSITION_TOTAL_COLS    (HIRES_ROW_BYTES)
 
@@ -285,13 +292,15 @@ static void transition_clear(const HiresBitmap *screen)
     // for every other section transition (the flag is already false).
     section_rasterirq_showcase_deactivate();
 
-    for (col = 0; col < TRANSITION_TOTAL_COLS; col = (uint8_t)(col + TRANSITION_COLS_PER_TICK))
+    for (col = TRANSITION_TOTAL_COLS - TRANSITION_COLS_PER_TICK; ; col = (uint8_t)(col - TRANSITION_COLS_PER_TICK))
     {
         uint8_t start_tick = main_frame_tick;
         transition_clear_band(screen->data, col);
         while ((uint8_t)(main_frame_tick - start_tick) < MAIN_FRAME_PACING_TICKS)
             ;
         music_check_toggle();
+        if (col == 0)
+            break;
     }
 
     // A plain loop, not dissolve.h's hires_row_colors_range() -- pulling in

@@ -199,7 +199,19 @@ void hires_put_ink(uint8_t col_byte, uint8_t y, uint8_t ink);
 void hires_put_paper(uint8_t col_byte, uint8_t y, uint8_t paper);
 
 // Sets INK at column-byte 0 and PAPER at column-byte 1 of row y (same
-// column order as charwin.c's row_setattr()).
+// column order as charwin.c's row_setattr()). CAVEAT: the ULA resets to
+// hardware-default white-ink/black-paper at the start of every scanline,
+// before it has scanned any attribute byte on that line -- so column-byte
+// 0's own on-screen cell (the ink byte itself) always renders against
+// black paper, REGARDLESS of the `paper` argument passed here, since
+// paper only takes effect starting at column-byte 1 where it's actually
+// written. This is invisible whenever `paper` is A_BGBLACK (matches the
+// hardware default anyway -- true for every caller except
+// section_background.c), but produces a real 6px mis-coloured stripe at
+// column 0 for any row using a non-black paper -- see section_background.c
+// for the fix (call hires_put_paper() directly at column-byte 0 instead,
+// skipping this function, whenever ink doesn't actually need to change
+// from the hardware default).
 void hires_row_colors(uint8_t y, uint8_t ink, uint8_t paper);
 
 // Toggle the invert bit (bit7) of a single byte, without touching its
