@@ -117,6 +117,25 @@ static const HxsprColor bird_color = { true, A_FWBLACK, A_FWWHITE };
 
 void section_bird_init(const HiresBitmap *screen)
 {
+    // These are static (persist for the demo's entire run, not just this
+    // section's), so on every run AFTER the first (the outer sections[]
+    // loop in main.c cycles forever) they'd otherwise still hold whatever
+    // values section_bird_tick() last left them at when this section was
+    // previously skipped/timed out -- NOT their compile-time initializers,
+    // which only apply once at cold boot. Two real, confirmed symptoms
+    // without this reset: (1) the bird starts mid-flight at its last
+    // position/angle instead of BIRD_MIN_COL/angle 0, and (2) worse, this
+    // function's own draw below always draws FRAME 0 (bird_walk with no
+    // offset), but the next section_bird_tick() call erases using
+    // bird_frame's -- stale, not necessarily 0 -- value at (bird_col,
+    // bird_y); XOR-erasing the wrong frame's shape doesn't cancel out
+    // frame 0's actual on-screen pixels, leaving a genuine garbled-pixel
+    // artifact.
+    bird_tick_count = 0;
+    bird_frame = 0;
+    bird_col = BIRD_MIN_COL;
+    bird_angle = 0;
+
     bird_y = bird_y_for_angle(bird_angle);
     hxspr_draw(screen, bird_walk, BIRD_FRAME_W_BYTES, BIRD_FRAME_H, bird_col, bird_y,
                HXSPR_XOR, (uint8_t *)0, &bird_color, (uint8_t *)0);
