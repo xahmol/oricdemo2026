@@ -561,6 +561,12 @@ static void arkos_setup_irq_bridge(void)
 // blew Oscar64's static stack budget using local buffers here).
 static char arkos_load_path[HOMEDIR_MAXLEN + 32];
 
+// See arkos.h's own comment on this declaration for why this is shared.
+char *arkos_load_path_buf(void)
+{
+    return arkos_load_path;
+}
+
 bool arkos_load(const char *path)
 {
     int16_t r;

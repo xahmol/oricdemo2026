@@ -11,12 +11,12 @@ original techniques of its own.
 Ships as **two independent, fully-playable distributions** built from the
 same source (`src/main.c` + `src/section_*.c`):
 
-- **LOCI** (`build/oricdemo.tap` + 7 asset files) — loads via a
+- **LOCI** (`build/oricdemo.tap` + 9 asset files) — loads via a
   [LOCI](https://github.com/sodiumlb/loci-rom) mass-storage device. The
-  `.tap` itself is only the code — music and every picture load from disk
-  at runtime, so **all 8 files must sit together in one folder** on the
-  LOCI's SD card/USB storage (see Installation below). Requires a real
-  LOCI device or an emulator that supports one; plain tape/cassette
+  `.tap` itself is only the code — music, every picture, and both voice
+  samples load from disk at runtime, so **all 10 files must sit together
+  in one folder** on the LOCI's SD card/USB storage (see Installation below).
+  Requires a real LOCI device or an emulator that supports one; plain tape/cassette
   playback or LOCI-less emulation will load the program but leave every
   picture/music load silently failing.
 - **Floppy disk** (`build/oricdemo_floppy.dsk`) — a single, fully
@@ -48,6 +48,9 @@ In running order:
 
 2. **Oric logo + raster bars** — the ORIC ATMOS 48K wordmark with two
    rotating, colour-cycling highlight bars sweeping behind/in front of it.
+   A spoken "Welcome to Oric Atmos" plays once the logo picture has
+   loaded, before the bars start animating — a crude AY-3-8912 digitized
+   voice sample, not synthesized speech (see [docs/voice.md](docs/voice.md)).
 
    ![Oric logo + raster bars](screenshots/02_logo.png)
 
@@ -97,7 +100,10 @@ In running order:
     ![Raster IRQ showcase](screenshots/11_rasterirqshowcase.png)
 
 12. **Credits** — a longer-form scroll over a converted sunset photograph,
-    crediting the tools, music, and source material used throughout.
+    crediting the tools, music, and source material used throughout. A
+    spoken "Thanks for watching" plays once the picture is up, before the
+    scroller starts — the same AY-3-8912 voice-sample technique as the
+    splash section's own "Welcome to Oric Atmos".
 
     ![Credits](screenshots/12_credits.png)
 
@@ -119,10 +125,11 @@ baked into the one image.
 
 ### LOCI
 
-The LOCI distribution is **8 files that must all live together in one
-folder** on the LOCI's SD card/USB storage — the program loads music and
-every picture from that same folder at runtime (relative to wherever the
-`.tap` itself was launched from, same convention as this project's sibling
+The LOCI distribution is **10 files that must all live together in one
+folder** on the LOCI's SD card/USB storage — the program loads music,
+every picture, and both voice samples from that same folder at runtime
+(relative to wherever the `.tap` itself was launched from, same
+convention as this project's sibling
 [OricScreenEditorLOCI](https://github.com/xahmol/OricScreenEditorLOCI)):
 
 | Filename | Description |
@@ -135,6 +142,8 @@ every picture from that same folder at runtime (relative to wherever the
 | `oricmag.bin` | Vintage magazine-photo picture |
 | `macaw.bin` | Scarlet macaw photo |
 | `sunset.bin` | Credits-screen sunset photo |
+| `voice_welcome.bin` | "Welcome to Oric Atmos" voice sample (logo section) |
+| `voice_thanks.bin` | "Thanks for watching" voice sample (credits section) |
 
 `make zip` builds all of these into one release ZIP, already laid out at
 `idi8b/oricdemo2026/` inside the archive (the same `idi8b/<ApplicationName>/`
@@ -146,7 +155,7 @@ archive's top level (unrelated to the LOCI folder requirement).
 
 1. Unzip the release ZIP directly onto the LOCI device's SD card/USB
    storage root — it already contains the right `idi8b/oricdemo2026/`
-   folder with all 8 files above together in it, no manual reorganizing
+   folder with all 10 files above together in it, no manual reorganizing
    needed.
 2. Go to the LOCI user interface (press the LOCI's own button), select
    tape images (**T**), browse (**SPACE**) to that folder, and select
@@ -181,9 +190,9 @@ make run-disk   # launch the floppy target in Oricutron -- fully self-contained,
 make run-phos   # launch the LOCI target in Phosphoric, WITH LOCI emulation
                 # (--loci-flash assets) -- the full experience, real AY audio too
 make test       # automated regression suite (Phosphoric, headless)
-make zip        # release ZIP: LOCI target + all 7 assets (under idi8b/oricdemo2026/) +
+make zip        # release ZIP: LOCI target + all 9 assets (under idi8b/oricdemo2026/) +
                 # floppy .dsk + README.pdf (both at the ZIP's top level) -- see Installation above
-make usb        # copy the LOCI target + all 7 assets + the floppy .dsk to a USB stick/LOCI SD card
+make usb        # copy the LOCI target + all 9 assets + the floppy .dsk to a USB stick/LOCI SD card
 ```
 
 (There's no plain Oricutron target for the LOCI/tape build — Oricutron has
@@ -216,6 +225,10 @@ reference (every `make` target, both runtimes, test fixtures) and
 - **Scarlet macaw photo**: Kandukuru Nagarjun (Jurong Bird Park), CC BY 2.0.
 - **Credits-screen sunset photo**: Artem Beliaikin, via Wikimedia Commons,
   CC0.
+- **"Welcome to Oric Atmos" and "Thanks for watching" voice samples**:
+  text-to-speech via ElevenLabs ("Pepper" voice), converted to
+  AY-3-8912 digidrums-style samples by `tools/oric_voiceconv.py` (see
+  [docs/voice.md](docs/voice.md)).
 - **A nod to** "Welcome to Oric Atmos" (Oric International, 1985) and to
   idi8b.
 

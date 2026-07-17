@@ -145,6 +145,8 @@ MAIN_SRCS = \
   include/scroller.h    \
   include/picture.c     \
   include/picture.h     \
+  include/voice.c       \
+  include/voice.h       \
   include/sprite.c      \
   include/sprite.h      \
   include/fixedmath.c   \
@@ -367,6 +369,8 @@ FLOPPY_SRCS = \
   include/scroller.h       \
   include/picture.c        \
   include/picture.h        \
+  include/voice.c          \
+  include/voice.h          \
   include/sprite.c         \
   include/sprite.h         \
   include/fixedmath.c      \
@@ -397,6 +401,8 @@ FLOPPY_ORICATMOS_BIN = assets/oricatmos.bin
 FLOPPY_ORICMAG_BIN = assets/oricmag.bin
 FLOPPY_MACAW_BIN = assets/macaw.bin
 FLOPPY_SUNSET_BIN = assets/sunset.bin
+FLOPPY_VOICE_BIN = assets/voice_welcome.bin
+FLOPPY_THANKS_BIN = assets/voice_thanks.bin
 
 # -------------------------------------------------------------------------
 # Two-pass build (see docs/floppy.md):
@@ -456,7 +462,7 @@ build/floppy_bootsector.bin: build/floppy_bootsector_compiled.bin
 # NOTE: oric_floppybuilder.py resolves script-relative paths against the
 # SCRIPT's own directory (tools/floppy/), not the caller's cwd -- so every
 # -D path here is made absolute via $(CURDIR) to sidestep that entirely.
-build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
+build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_pass1.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN) $(FLOPPY_VOICE_BIN) $(FLOPPY_THANKS_BIN)
 	$(PY) tools/oric_floppybuilder.py init tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/floppy_init.dsk \
@@ -472,7 +478,9 @@ build/floppy_directory.h: build/floppy_loader_placeholder.bin build/floppy_demo_
 	    -D ORICATMOS_BIN=$(CURDIR)/$(FLOPPY_ORICATMOS_BIN) \
 	    -D ORICMAG_BIN=$(CURDIR)/$(FLOPPY_ORICMAG_BIN) \
 	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN) \
-	    -D SUNSET_BIN=$(CURDIR)/$(FLOPPY_SUNSET_BIN)
+	    -D SUNSET_BIN=$(CURDIR)/$(FLOPPY_SUNSET_BIN) \
+	    -D VOICE_BIN=$(CURDIR)/$(FLOPPY_VOICE_BIN) \
+	    -D THANKS_BIN=$(CURDIR)/$(FLOPPY_THANKS_BIN)
 
 # Real values, parsed out of the generated header by the shell (make has
 # no built-in way to read a C #define -- this is simpler than teaching
@@ -511,7 +519,7 @@ build/floppy_demo.bin: build/floppy_directory.h $(FLOPPY_SRCS)
 	$(CC) $(CFLAGS_FLOPPY_DEMO) -i=build \
 	    -o=build/floppy_demo.bin src/main.c
 
-build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN)
+build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/floppy_bootsector.bin tools/floppy/disk_script_demo.txt tools/floppy/directory_sanity_sector.bin tools/floppy/sector1_header.bin $(FLOPPY_LOGO_BIN) $(FLOPPY_MUSIC2_BIN) $(FLOPPY_ORICATMOS_BIN) $(FLOPPY_ORICMAG_BIN) $(FLOPPY_MACAW_BIN) $(FLOPPY_SUNSET_BIN) $(FLOPPY_VOICE_BIN) $(FLOPPY_THANKS_BIN)
 	$(PY) tools/oric_floppybuilder.py build tools/floppy/disk_script_demo.txt \
 	    -D LAYOUT_HEADER=$(CURDIR)/build/floppy_directory.h \
 	    -D DISK_IMAGE=$(CURDIR)/build/oricdemo_floppy.dsk \
@@ -527,7 +535,9 @@ build/oricdemo_floppy.dsk: build/floppy_loader.bin build/floppy_demo.bin build/f
 	    -D ORICATMOS_BIN=$(CURDIR)/$(FLOPPY_ORICATMOS_BIN) \
 	    -D ORICMAG_BIN=$(CURDIR)/$(FLOPPY_ORICMAG_BIN) \
 	    -D MACAW_BIN=$(CURDIR)/$(FLOPPY_MACAW_BIN) \
-	    -D SUNSET_BIN=$(CURDIR)/$(FLOPPY_SUNSET_BIN)
+	    -D SUNSET_BIN=$(CURDIR)/$(FLOPPY_SUNSET_BIN) \
+	    -D VOICE_BIN=$(CURDIR)/$(FLOPPY_VOICE_BIN) \
+	    -D THANKS_BIN=$(CURDIR)/$(FLOPPY_THANKS_BIN)
 
 disk: build/oricdemo_floppy.dsk
 
@@ -701,7 +711,7 @@ CYCLES   ?= 8000000
 # all: must appear first so it is the default goal
 # =========================================================================
 
-.PHONY: all clean run-phos run-phos-buildtest docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv disk run-disk test-disk
+.PHONY: all clean run-phos run-phos-buildtest docs zip check-usb usb check-phosphoric sandbox-reset test-capture test-boot test test-hires check-pictconv test-pictconv test-voiceconv disk run-disk test-disk
 
 all: build/$(MAIN).tap
 
@@ -800,6 +810,8 @@ usb: check-usb all disk
 	cp assets/oricmag.bin "$(USBPATH)/"
 	cp assets/macaw.bin "$(USBPATH)/"
 	cp assets/sunset.bin "$(USBPATH)/"
+	cp assets/voice_welcome.bin "$(USBPATH)/"
+	cp assets/voice_thanks.bin "$(USBPATH)/"
 	cp build/oricdemo_floppy.dsk "$(USBPATH)/"
 	@if [ "$(IS_WSL2)" = "1" ]; then \
 	    echo "WSL2: unmounting $(USBMOUNT)..."; \
@@ -855,6 +867,7 @@ test-boot: check-phosphoric sandbox-reset
 test:
 	$(MAKE) test-boot
 	$(MAKE) test-pictconv
+	$(MAKE) test-voiceconv
 
 # oric_pictconv.py unit test -- pure Python, no emulator, fast enough to
 # fold into the default 'make test' (unlike test-hires, which needs a slow
@@ -865,6 +878,13 @@ check-pictconv:
 
 test-pictconv: check-pictconv
 	python3 tests/scripts/test_pictconv.py
+
+# oric_voiceconv.py unit test -- pure Python, no emulator, no dependencies
+# (stdlib only), fast enough to fold into the default 'make test'. Also
+# the real enforcement of VOICE_SAMPLE_SIZE's safe ceiling -- see
+# docs/voice.md and tests/scripts/test_voiceconv.py's own header comment.
+test-voiceconv:
+	python3 tests/scripts/test_voiceconv.py
 
 # HIRES library test (separate/opt-in -- not part of 'make test' since it
 # needs a second .tap build with the alternate oric_crt_hires.c runtime).
@@ -903,7 +923,7 @@ README.pdf: README.md
 	fi
 
 # -------------------------------------------------------------------------
-# Release ZIP -- both distributions (LOCI target: .tap + all 7 assets;
+# Release ZIP -- both distributions (LOCI target: .tap + all 9 assets;
 # floppy target: the single self-contained .dsk) plus the PDF README.
 # The LOCI files go under idi8b/oricdemo2026/ WITHIN the zip -- the same
 # idi8b/<ApplicationName>/ distribution convention .env.example's own
@@ -931,6 +951,8 @@ zip: all disk docs
 	cp assets/oricmag.bin $(ZIPLOCIDIR)/
 	cp assets/macaw.bin $(ZIPLOCIDIR)/
 	cp assets/sunset.bin $(ZIPLOCIDIR)/
+	cp assets/voice_welcome.bin $(ZIPLOCIDIR)/
+	cp assets/voice_thanks.bin $(ZIPLOCIDIR)/
 	cp build/oricdemo_floppy.dsk $(ZIPSTAGE)/
 	cp README.pdf $(ZIPSTAGE)/
 	cd $(ZIPSTAGE) && zip -r "$(CURDIR)/build/$(ZIPNAME).zip" .

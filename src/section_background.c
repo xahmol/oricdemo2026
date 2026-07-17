@@ -173,13 +173,15 @@ void section_background_run(const HiresBitmap *screen)
     // Colour -- LAST, so it isn't clobbered by any of the pixel-content
     // drawing above. PAPER goes at column-byte 0, INK at column-byte 1 --
     // the reverse of hires_row_colors()'s own ink-then-paper order (see
-    // that function's own header comment) -- because the ULA resets to
-    // hardware-default black paper at the start of every scanline, before
-    // it has scanned any attribute byte on that line: whichever attribute
-    // occupies column-byte 0 renders against whatever paper is active at
-    // THAT exact position, so it must be the paper-setting byte itself for
-    // column 0 to show the real sky/bank/river colour instead of a stray
-    // black stripe. Column-byte 1 (ink) then renders correctly too, since
+    // that function's own header comment) -- because attribute effects
+    // are IMMEDIATE (a PAPER byte changes background colour starting at
+    // its OWN column, not one column later), so putting PAPER at
+    // column-byte 0 itself is what makes column 0 show the real
+    // sky/bank/river colour instead of a stray black stripe (the
+    // hardware default the ULA resets to at the start of every scanline,
+    // still active at column 0 if nothing there sets paper -- exactly
+    // hires_row_colors()'s own bug, since it puts INK, not PAPER, at
+    // column 0). Column-byte 1 (ink) then renders correctly too, since
     // paper is already active by then. Both bytes are still written (not
     // just the paper one) to keep clobbering whatever stray pixel content
     // the wavy river line above may have left in columns 0-1 for some rows.

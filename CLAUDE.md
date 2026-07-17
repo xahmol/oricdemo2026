@@ -66,7 +66,7 @@ reason removing plain `run` loses nothing real. Both targets are built
 and tested completely
 independently, and both source the SAME `src/main.c`/`src/section_*.c`
 content. See `README.md`'s own Installation section for the full LOCI
-distribution/install flow (8 files that must all sit in one folder).
+distribution/install flow (10 files that must all sit in one folder).
 
 Build chain (see `Makefile`):
 ```
@@ -76,13 +76,15 @@ make run-phos   # launch the real demo (build/oricdemo.tap) visually in Phosphor
                 # needs PHOSDIR in .env, oric1-emu built with SDL2=1
 make run-phos-buildtest # launch src/buildtest.c (build/buildtest.tap) visually in Phosphoric --
                 # the build-chain/LOCI/Arkos regression test, not the real demo
-make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.py unit tests
+make test       # Phosphoric boot smoke test (src/buildtest.c) + oric_pictconv.py/oric_voiceconv.py unit tests
 make test-hires # opt-in: HIRES library Phosphoric smoke test (separate .tap, oric_crt_hires.c)
 make test-pictconv # oric_pictconv.py unit tests alone (pure Python, no emulator)
+make test-voiceconv # oric_voiceconv.py unit tests alone (pure Python, no emulator; also
+                # enforces VOICE_SAMPLE_MAX_SIZE's safe ceiling for both voice clips, see docs/voice.md)
 make test-capture CYCLES=N TYPEKEYS='...'   # calibration helper, dumps RAM+screenshot, no assertions
-make usb        # copy build/oricdemo.tap + all 7 assets/*.aky|*.bin (LOCI target) + build/oricdemo_floppy.dsk to USBPATH (.env)
+make usb        # copy build/oricdemo.tap + all 9 assets/*.aky|*.bin (LOCI target) + build/oricdemo_floppy.dsk to USBPATH (.env)
 make docs       # README.md -> README.pdf (needs pandoc)
-make zip        # release ZIP: build/oricdemo.tap + all 7 assets/*.aky|*.bin laid out under
+make zip        # release ZIP: build/oricdemo.tap + all 9 assets/*.aky|*.bin laid out under
                 # idi8b/oricdemo2026/ (matching .env.example's own USBPATH convention),
                 # plus build/oricdemo_floppy.dsk + README.pdf at the ZIP's top level
 make disk       # floppy-disk target, REAL demo -> build/oricdemo_floppy.dsk (see docs/floppy.md)
@@ -244,9 +246,21 @@ make clean
     (keeps ~8000 bytes/picture out of the main code/data/BSS budget).
     Every real picture in the demo loads through this, not a compiled-in
     array. See `docs/picture.md`.
+  - `voice.c/h` — AY-3-8912 "digidrums"-style voice-sample playback: two
+    hardcoded clips, "Welcome to Oric Atmos" (played once from
+    `src/section_logo.c`, right after the logo picture loads) and
+    "Thanks for watching" (played once from `src/section_credits.c`),
+    sharing one fixed
+    overlay-RAM address since they're never resident/playing at the same
+    time. Same dual-signature loading convention as `arkos.c/h`/
+    `picture.c/h`; the actual playback rewrites `AY_REG_VOL_A` from a
+    pre-quantized sample buffer at a fixed rate, with music paused and
+    interrupts off for the duration. See `docs/voice.md`.
 - `tools/mktap.py` — wraps an Oscar64 raw `.bin` in an Oric `.tap` tape header.
 - `tools/oric_pictconv.py` — JPG/PNG -> HIRES bitmap converter (mono/colored/aic
   modes). See `docs/pictconv.md`.
+- `tools/oric_voiceconv.py` — WAV -> AY-3-8912 4-bit voice-sample converter
+  (stdlib only). See `docs/voice.md`.
 - `tools/oric_ttfconv.py` — TTF -> proportional HIRES bitmap font converter, for
   `include/ttf.h`. See `docs/ttf.md`.
 - `tools/oric_floppybuilder.py` — Python port of OSDK's FloppyBuilder tool,
@@ -272,6 +286,10 @@ make clean
     `arkos_load(file_index)` AY-register assertion. See `docs/floppy.md`.
   - `tests/scripts/test_pictconv.py` — `oric_pictconv.py` unit tests (`make
     test-pictconv`), pure Python, no emulator.
+  - `tests/scripts/test_voiceconv.py` — `oric_voiceconv.py` unit tests (`make
+    test-voiceconv`), pure Python, no emulator; also asserts BOTH voice
+    clips' real sizes stay within `VOICE_SAMPLE_MAX_SIZE`'s shared safe
+    ceiling. See `docs/voice.md`.
   - `tests/scripts/test_floppybuilder.py` — `tools/oric_floppybuilder.py`
     unit tests, pure Python, no emulator. See `docs/floppy.md`.
   - `tests/fixtures/` — files copied into `tests/sandbox/` before each Phosphoric
@@ -287,8 +305,11 @@ make clean
 - `assets/` — real demo assets consumed by `src/section_*.c` files (as opposed
   to `tests/fixtures/`, which only test scaffolding uses): 2 Arkos `.aky`
   music modules, 6 `oric_pictconv.py`-converted `.bin` pictures (loaded at
-  runtime via `include/picture.h`, see above — none compiled in), and
-  `assets/bird.h` (7-frame walk-cycle sprite data for
+  runtime via `include/picture.h`, see above — none compiled in),
+  `assets/voice_welcome.bin` and `assets/voice_thanks.bin`
+  (`tools/oric_voiceconv.py`-converted AY digidrums voice samples, loaded
+  via `include/voice.h` — see above), and `assets/bird.h` (7-frame
+  walk-cycle sprite data for
   `src/section_bird.c`, adapted from mihai-dragan's `oric_BAS` project,
   MIT License, github.com/xahmol/sprites — see that file's header comment
   for the full attribution note). Every asset's exact source/license is

@@ -28,6 +28,7 @@
 #include "oric.h"
 #include "hires.h"
 #include "picture.h"
+#include "voice.h"
 #include "scroller.h"
 #include "strings.h"
 #include "section_credits.h"
@@ -35,9 +36,24 @@
 
 #ifdef STORAGE_FLOPPY
 #define SUNSET_FILE 7
+#define THANKS_FILE 9
 #else
 #define SUNSET_FILE "sunset.bin"
+#define THANKS_FILE "voice_thanks.bin"
 #endif
+// 7000Hz, not section_logo.c's own 4000Hz -- "Thanks for watching" is
+// more consonant/fricative-heavy ("th", "ks", "tch") than "Welcome to
+// Oric Atmos"'s own more vowel-heavy syllables, and those higher-
+// frequency sounds need more time resolution to stay recognizable at
+// only 16 amplitude levels (see docs/voice.md's own "Per-clip sample
+// rate" note). This clip also has by far the most headroom under the
+// shared 7731-byte ceiling (7079 bytes here vs. 6080 for
+// voice_welcome.bin at 4000Hz), so the higher rate costs nothing.
+#define VOICE_THANKS_SIZE 7079U
+// 1000000/7000Hz, truncated -- see voice.h's own comment for why this
+// must be a compile-time constant (a runtime rate->period division
+// overflowed the BSS budget).
+#define VOICE_THANKS_PERIOD 142U
 
 #define TAGLINE_Y 185u
 
@@ -78,6 +94,18 @@ void section_credits_init(const HiresBitmap *screen)
 {
     picture_load(SUNSET_FILE, (void *)HIRESVRAM, 8000);
     clear_caption_band(screen);
+
+    // "Thanks for watching" -- played once the sunset picture is up but
+    // before the credit-lines scroller starts. voice_play() pauses music
+    // and blocks synchronously for the sample's own ~1s duration -- safe
+    // here, nothing else in this function or run_section()'s own
+    // scheduler (src/main.c) depends on section_credits_init() returning
+    // quickly. Same graceful-failure posture as picture_load() above: if
+    // voice_load() fails (no LOCI/floppy device, file missing), playback
+    // is skipped silently rather than erroring -- the scroller just
+    // starts immediately.
+    if (voice_load(THANKS_FILE, VOICE_THANKS_SIZE))
+        voice_play(VOICE_THANKS_SIZE, VOICE_THANKS_PERIOD);
 
     credit_index = 0;
     scroller_init(screen, credit_lines[credit_index], TAGLINE_Y, SCROLLER_PLAIN);

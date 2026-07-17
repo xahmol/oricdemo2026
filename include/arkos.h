@@ -73,6 +73,19 @@
 bool arkos_load(uint8_t file_index);
 #else
 bool arkos_load(const char *path);
+
+// Returns arkos_load()'s own internal homedir-join scratch buffer, for
+// OTHER one-shot LOCI loaders (currently just voice.c's voice_load()) to
+// reuse via homedir_join()+file_load() themselves, instead of each
+// allocating their own private HOMEDIR_MAXLEN-sized static buffer --
+// real, tight main code/data/BSS budget (~36.1KB, docs/hires.md), and a
+// second/third copy of this exact 96-byte buffer didn't fit. Safe: every
+// caller (arkos_load(), picture_load(), voice_load()) is a one-shot,
+// fully blocking, sequential call that freshly repopulates this buffer
+// via homedir_join() before using it -- none of them run concurrently
+// with any other, so whatever an earlier caller left behind is always
+// overwritten before the next caller reads it.
+char *arkos_load_path_buf(void);
 #endif
 
 // Resets playback to the start of the currently loaded module (Linker

@@ -75,3 +75,13 @@ AddDefine LOADER_MACAW_FILE {FileIndex}
 ; (STORAGE_FLOPPY) -- see src/section_credits.c's SUNSET_FILE.
 AddFile {SUNSET_BIN}
 AddDefine LOADER_SUNSET_FILE {FileIndex}
+
+; File index 8: assets/voice_welcome.bin, loaded via voice_load(8, ...)
+; (STORAGE_FLOPPY) -- see src/section_logo.c's VOICE_FILE.
+AddFile {VOICE_BIN}
+AddDefine LOADER_VOICE_FILE {FileIndex}
+
+; File index 9: assets/voice_thanks.bin, loaded via voice_load(9, ...)
+; (STORAGE_FLOPPY) -- see src/section_credits.c's THANKS_FILE.
+AddFile {THANKS_BIN}
+AddDefine LOADER_THANKS_FILE {FileIndex}

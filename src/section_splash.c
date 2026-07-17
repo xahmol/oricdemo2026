@@ -61,8 +61,14 @@
 #define SPLASH_CELLS_PER_TICK 40u
 
 // How many ticks to hold the fully-revealed splash before fading back out
-// (~60 * ~74ms =~ 4.4s -- long enough to read, not so long it drags; cut
-// down from an earlier, slower version per user feedback on overall pace).
+// (~60 * ~74ms =~ 4.4s). Moving the "Welcome to Oric Atmos" voice sample's
+// load+playback into this hold phase was tried (to absorb its ~1.5-2s
+// into this section's own natural pause instead of section_logo.c's
+// post-picture-load delay) and reverted -- see section_logo.c's own
+// header comment and docs/voice.md for why: the real black-screen gap
+// real-hardware testing reported is section_logo_init()'s own
+// picture_load() I/O latency, not the voice sample, and moving the
+// sample elsewhere doesn't touch that. This phase stays audio-free.
 #define SPLASH_HOLD_TICKS 60u
 
 typedef enum

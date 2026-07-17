@@ -124,14 +124,22 @@
 #include "oric.h"
 #include "hires.h"
 #include "picture.h"
+#include "voice.h"
 #include "fixedmath.h"
 #include "section_logo.h"
 
 #ifdef STORAGE_FLOPPY
 #define LOGO_FILE 2
+#define VOICE_FILE 8
 #else
 #define LOGO_FILE "oriclogo.bin"
+#define VOICE_FILE "voice_welcome.bin"
 #endif
+#define VOICE_WELCOME_SIZE 6080U
+// 1000000/4000Hz -- see voice.h's own comment for why this must be a
+// compile-time constant (a runtime rate->period division overflowed the
+// BSS budget).
+#define VOICE_WELCOME_PERIOD 250U
 
 // Row range the logo occupies within the loaded 240x200 picture (see this
 // file's own header comment on how assets/oriclogo.bin was composited --
@@ -320,6 +328,25 @@ void section_logo_init(const HiresBitmap *screen)
     // device, file missing) rather than crashing, same graceful-failure
     // posture as arkos_load().
     picture_load(LOGO_FILE, (void *)HIRESVRAM, 8000);
+
+    // "Welcome to Oric Atmos" -- played once the logo picture is up but
+    // before the bars start animating. voice_play() pauses music and
+    // blocks synchronously for the sample's own ~1.5s duration. Moving
+    // this earlier (into section_splash.c's own hold phase, so it
+    // overlaps with the still-visible splash instead of running here)
+    // was tried and reverted: it only hides the SAMPLE's own load+
+    // playback time, not picture_load() above's own real I/O latency --
+    // that's the actual source of the "black screen after the splash"
+    // gap real-hardware testing reported, and it happens right here,
+    // AFTER any relocation of the voice call -- so moving the sample
+    // didn't address the delay it was meant to fix. See docs/voice.md's
+    // own "Why welcome plays from section_logo.c, not section_splash.c"
+    // note for the full investigation. Same graceful-failure posture as
+    // picture_load() above: if voice_load() fails (no LOCI/floppy
+    // device, file missing), playback is skipped silently rather than
+    // erroring.
+    if (voice_load(VOICE_FILE, VOICE_WELCOME_SIZE))
+        voice_play(VOICE_WELCOME_SIZE, VOICE_WELCOME_PERIOD);
 
     // Bar A: starts at the top, sweeping down ("behind"/translucent).
     bar_a.angle     = 0;
