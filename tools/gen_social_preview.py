@@ -106,7 +106,7 @@ canvas.paste(logo_scaled, (logo_x, logo_y))
 
 # --- Text ---
 draw.text((TEXT_X, TITLE_Y),  "oricdemo2026",         font=font_title, fill=C_CYAN)
-draw.text((TEXT_X, VERS_Y),   "v1.0.0",                font=font_vers,  fill=C_YELLOW)
+draw.text((TEXT_X, VERS_Y),   "v1.1.0",                font=font_vers,  fill=C_YELLOW)
 draw.text((TEXT_X, DESC_Y),        "12-section demoscene",    font=font_desc, fill=C_WHITE)
 draw.text((TEXT_X, DESC_Y + 34),   "production for the",      font=font_desc, fill=C_WHITE)
 draw.text((TEXT_X, DESC_Y + 68),   "Oric Atmos",               font=font_desc, fill=C_WHITE)
