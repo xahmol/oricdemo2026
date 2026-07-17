@@ -298,6 +298,14 @@ byte-level bit-shifting like `gfx/bitmap.c`'s heavily tuned 6502 routines —
 correctness first; a future pass could special-case byte-aligned/whole-byte
 spans for speed if a demo effect turns out to need it.
 
+`hb_rect_fill()` fills top-to-bottom, right-to-left within each row (not
+left-to-right) — deliberately: none of this project's fills wait for
+vsync, so a large fill (e.g. `section_splash.c`'s full-width erase-rect)
+visibly races the CRT beam over dozens of frames. Right-to-left means
+column-bytes 0-1 (a row's own ink/paper attribute bytes, whenever a fill
+spans x=0) are the last thing touched, not the first — same reasoning as
+`main.c`'s `transition_clear()` sweep.
+
 `hb_rect_pattern` repeats an 8×8 pixel tile (`pattern[8]`, one byte per
 tile row, bit7=leftmost *of the tile*, independent of Oric's 6px HIRES byte
 packing) across the rect — a monochrome hatch/texture fill, not colour

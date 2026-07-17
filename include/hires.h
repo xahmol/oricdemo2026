@@ -242,6 +242,13 @@ void hires_aic_apply_range(const HiresAIC *aic, uint8_t y0, uint8_t y1);
 // byte-level bit-shifting -- correctness first; see hires.c.
 // -------------------------------------------------------------------------
 
+// Fills row-by-row, top to bottom; WITHIN each row, right to left (column
+// w-1 down to 0) -- see hires.c's own comment for why: on a large,
+// unsynchronized fill (no vsync wait anywhere in this project), the CPU
+// visibly races the CRT beam, so whichever end of a row is touched FIRST
+// shows wrong/blank for a while before the fill catches up. Right-to-left
+// means column-bytes 0-1 (a row's own ink/paper attribute bytes, whenever
+// a fill spans x=0) are touched LAST, not first.
 void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool set);
 
 // Monochrome pattern fill: repeats an 8x8 pixel tile (pattern[8], one byte

@@ -408,6 +408,18 @@ void hires_aic_apply_range(const HiresAIC *aic, uint8_t y0, uint8_t y1)
 // turns out to need it.
 // -------------------------------------------------------------------------
 
+// Column order is RIGHT TO LEFT within each row (row order stays top to
+// bottom) -- deliberately, not just style: column-bytes 0-1 hold that
+// row's own ink/paper attribute bytes wherever a fill spans x=0 (e.g.
+// section_splash.c's large full-width erase-rect), and this project's own
+// unsynchronized (no vsync wait) per-pixel fills are slow enough relative
+// to one video frame to visibly race the CRT beam -- a large fill like
+// that one takes ~45+ frames to complete, so whichever end of each row
+// gets touched FIRST is visibly wrong-coloured/blank for a while before
+// the fill catches up to it. Touching columns 0-1 LAST (not first) means
+// the row's real attributes survive until there's no real content left
+// in that row to protect -- same reasoning as main.c's transition_clear()
+// sweep, which fixed the identical hazard for its own column-band wipe.
 void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool set)
 {
     for (uint8_t row = 0; row < h; row++)
@@ -415,11 +427,17 @@ void hb_rect_fill(const HiresBitmap *hb, const HiresClip *clip, uint8_t x, uint8
         uint8_t py = (uint8_t)(y + row);
         if (clip && (py < clip->top || py > clip->bottom))
             continue;
-        for (uint8_t col = 0; col < w; col++)
+        if (w == 0)
+            continue;
+        uint8_t col = (uint8_t)(w - 1);
+        for (;;)
         {
             uint8_t px = (uint8_t)(x + col);
             if (!clip || (px >= clip->left && px <= clip->right))
                 hb_put(hb, px, py, set);
+            if (col == 0)
+                break;
+            col--;
         }
     }
 }
