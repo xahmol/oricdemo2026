@@ -239,5 +239,4 @@ comment at its own point of use in `src/`.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) — this is version 1.0.0, the initial
-public release.
+See [CHANGELOG.md](CHANGELOG.md) — this is version 1.1.0.

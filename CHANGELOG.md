@@ -5,6 +5,49 @@ All notable changes to this project are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-07-17
+
+### Added
+
+- AY-3-8912 "digidrums"-style voice-sample playback (`include/voice.c/h`,
+  `tools/oric_voiceconv.py`): two spoken clips, "Welcome to Oric Atmos"
+  (after the Oric logo loads) and "Thanks for watching" (before the
+  credits scroller starts), each converted from a text-to-speech WAV
+  source down to 4-bit AY volume-register samples and played back via a
+  paced VIA Timer 1 rewrite loop. The two clips share one fixed
+  overlay-RAM address and use independent, per-clip sample rates (the
+  thanks clip runs at a higher 7000Hz for better consonant clarity,
+  within the same shared byte-size ceiling). See
+  [docs/voice.md](docs/voice.md) for the full design writeup, including
+  the real Oscar64-optimizer and BSS-budget issues found and fixed while
+  building it. Playback technique based on ChibiAkumas's Z80 tutorial
+  series, [Lesson P35](https://www.chibiakumas.com/z80/platform4.php#LessonP35).
+
+### Fixed
+
+- A visible flash-to-white-on-black during the outgoing scene's own
+  transition wipe (`transition_clear()` swept left-to-right, blanking
+  each row's ink/paper attribute bytes before the rest of that row was
+  wiped, exposing the ULA's per-scanline hardware default for the rest
+  of the transition) — now sweeps right-to-left instead.
+- A permanent black stripe at column 0 of the bird scene's sky/bank/river
+  rows (`section_background.c` used ink-then-paper column order; the ULA
+  resets to hardware-default black paper at the start of every scanline,
+  so column 0 never showed the intended non-black paper) — fixed by
+  writing paper at column 0, ink at column 1.
+- The same CRT-beam-racing class of bug in `hb_rect_fill()`'s large
+  full-width fills, now filled right-to-left within each row so the
+  ink/paper attribute bytes are touched last, not first.
+- The bird scene not resetting its own animation state
+  (`bird_tick_count`/`bird_frame`/`bird_col`/`bird_angle`) between
+  passes through the demo's section loop — caused both a wrong starting
+  position and a genuine garbled-pixel artifact on every run after the
+  first. Every other section was audited for the same bug class; none
+  found.
+- Two pre-existing `make test-hires` failures (missing charset data and
+  a missing include path in the test fixture, not the library itself) —
+  75/75 assertions now pass.
+
 ## [1.0.0] — 2026-07-15
 
 Initial public release — a full 12-section demoscene production for the
