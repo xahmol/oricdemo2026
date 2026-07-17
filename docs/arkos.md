@@ -183,6 +183,7 @@ lesson for any future change to `arkos.c`'s hot path.
 bool arkos_load(uint8_t file_index);
 #else
 bool arkos_load(const char *path);
+char *arkos_load_path_buf(void);
 #endif
 void arkos_init(void);
 __interrupt void arkos_tick(void);
@@ -197,6 +198,19 @@ buffer (`ARKOS_MODULE`) -- see "Memory layout" above for the two different
 target-specific behaviors. Returns `false` (silent no-op, no music, not a
 crash) on any failure (no LOCI/floppy device, file not found, file too
 large for `ARKOS_MAX_MODULE_SIZE`).
+
+`arkos_load_path_buf()` (tape/LOCI target only) returns `arkos_load()`'s
+own internal `homedir_join()` scratch buffer, so OTHER one-shot LOCI
+loaders can reuse it instead of each allocating their own private
+`HOMEDIR_MAXLEN`-sized static buffer -- the main code/data/BSS budget
+(~36.1KB, `docs/hires.md`) is tight enough that a second or third copy of
+this exact 96-byte buffer doesn't fit (a real, confirmed link-time BSS
+overflow this fixed). Safe because every caller (`arkos_load()`,
+`picture_load()`, `voice_load()`) is a one-shot, fully blocking,
+sequential call that freshly repopulates the buffer via `homedir_join()`
+before using it -- none of them ever run concurrently with any other.
+Currently reused by `include/picture.c`'s `picture_load()` and
+`include/voice.c`'s `voice_load()` (see `docs/picture.md`/`docs/voice.md`).
 
 `arkos_init()` resets playback to the start of the Linker (order
 position) and all per-channel Track/RegisterBlock state. Call once after a

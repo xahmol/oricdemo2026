@@ -101,12 +101,16 @@ code-generation bug), (b) `min_ticks` has elapsed and a key is pressed, or
 loop cycles through the whole table forever — credits (the last entry)
 loops back into the splash, no special "press key to exit" needed.
 
-Between every section, `transition_clear()` sweeps a left-to-right
+Between every section, `transition_clear()` sweeps a right-to-left
 blank-and-reset wipe (raw `memset`, not `hb_rect_fill()` — the latter
 measured as tens of millions of wasted cycles for a solid full-height
 band, see that function's own header comment) before the next section's
 `init()` runs, so no section ever inherits stray pixel/attribute state
-from the one before it.
+from the one before it. Right-to-left, not left-to-right: each row's
+own ink/paper attribute bytes live at column-bytes 0-1, so sweeping
+that direction touches them LAST, avoiding a real, previously-confirmed
+bug where the outgoing scene briefly flashed to the ULA's hardware-default
+white-ink/black-paper for the rest of the transition.
 
 ## Per-section techniques
 

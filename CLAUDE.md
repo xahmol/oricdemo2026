@@ -254,8 +254,10 @@ make clean
     overlay-RAM address since they're never resident/playing at the same
     time. Same dual-signature loading convention as `arkos.c/h`/
     `picture.c/h`; the actual playback rewrites `AY_REG_VOL_A` from a
-    pre-quantized sample buffer at a fixed rate, with music paused and
-    interrupts off for the duration. See `docs/voice.md`.
+    pre-quantized sample buffer, each clip paced at its own per-call
+    rate (VIA Timer 1 reprogrammed to a compile-time-constant period,
+    not one shared fixed rate), with music paused and interrupts off
+    for the duration. See `docs/voice.md`.
 - `tools/mktap.py` — wraps an Oscar64 raw `.bin` in an Oric `.tap` tape header.
 - `tools/oric_pictconv.py` — JPG/PNG -> HIRES bitmap converter (mono/colored/aic
   modes). See `docs/pictconv.md`.

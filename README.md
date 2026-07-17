@@ -103,7 +103,7 @@ In running order:
     crediting the tools, music, and source material used throughout. A
     spoken "Thanks for watching" plays once the picture is up, before the
     scroller starts — the same AY-3-8912 voice-sample technique as the
-    splash section's own "Welcome to Oric Atmos".
+    Oric logo section's own "Welcome to Oric Atmos".
 
     ![Credits](screenshots/12_credits.png)
 
