@@ -227,6 +227,7 @@ CFLAGS_HIRES = \
   -rt=include/oric_crt_hires.c \
   -i=include      \
   -i=src          \
+  -i=assets       \
   -i=tests/fixtures \
   -O2             \
   -dNOFLOAT

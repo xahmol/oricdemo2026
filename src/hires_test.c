@@ -4,6 +4,7 @@
 // Exercises the HIRES library incrementally as it's built out; see
 // tests/scripts/test_hires.sh for what's asserted at each stage.
 
+#include <string.h>
 #include "oric.h"
 #include "hires.h"
 #include "ttf.h"
@@ -13,6 +14,7 @@
 #include "dissolve.h"
 #include "rasterirq.h"
 #include "ay.h"
+#include "rom_charset.h"
 
 // hrirq test callback: writes a marker byte so the RAM dump can prove the
 // IRQ handler actually fired and dispatched it. Must be __interrupt (saves
@@ -66,6 +68,16 @@ int main(void)
     // already proven correct by these two calls.
     hires_on(true);
     hires_footer_enable(true);
+
+    // Copy real charset data into HIRES_CHARSET_STD, right after hires_on()
+    // (which zeroes it, see hires.c's own comment) and before the
+    // hb_put_chars()/hb_put_chars_center() tests below -- same convention
+    // main.c uses at boot (see its own comment for the full rationale).
+    // Without this, HIRES_CHARSET_STD stays all-zero, so hb_put_chars()
+    // reads an all-zero glyph and draws nothing (every pixel bit test
+    // evaluates false) -- exactly the "expected '48', got '40'"-style
+    // failures this omission caused before this fix.
+    memcpy((void *)(HIRES_CHARSET_STD + 0x20 * 8), rom_charset, sizeof(rom_charset));
 
     // Attribute/colour test: row 2's column-bytes 0/1 should hold INK=RED
     // (1) and PAPER=GREEN (18) at hires_row_off[2] == $A050/$A051.
