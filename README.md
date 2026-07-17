@@ -228,7 +228,9 @@ reference (every `make` target, both runtimes, test fixtures) and
 - **"Welcome to Oric Atmos" and "Thanks for watching" voice samples**:
   text-to-speech via ElevenLabs ("Pepper" voice), converted to
   AY-3-8912 digidrums-style samples by `tools/oric_voiceconv.py` (see
-  [docs/voice.md](docs/voice.md)).
+  [docs/voice.md](docs/voice.md)). The playback technique itself is
+  based on ChibiAkumas's Z80 tutorial series,
+  [Lesson P35 — "Playing Digital Sound with WAV on the AY!"](https://www.chibiakumas.com/z80/platform4.php#LessonP35).
 - **A nod to** "Welcome to Oric Atmos" (Oric International, 1985) and to
   idi8b.
 

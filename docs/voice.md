@@ -1,5 +1,9 @@
 # AY-3-8912 voice-sample playback (voice.h)
 
+Based on ChibiAkumas's Z80 tutorial series, [Lesson P35 — "Playing
+Digital Sound with WAV on the AY!"](https://www.chibiakumas.com/z80/platform4.php#LessonP35)
+— see "Attribution" below for exactly what was adapted.
+
 Plays two hardcoded digitized voice clips, each once: "Welcome to Oric
 Atmos" (from `src/section_logo.c`, once the Oric logo picture has loaded
 but before the raster bars start animating) and "Thanks for watching"
@@ -277,6 +281,26 @@ byte count against the shared 7,731-byte ceiling, and keep the matching
 actually used.
 
 ## Attribution
+
+The playback **technique** itself (quantize a WAV file down to a low bit
+depth, mute the channel's tone/noise generators so only its volume
+register remains, repeatedly rewrite that register at a paced rate to
+reconstruct the waveform, silence it when done) is based on
+ChibiAkumas's Z80 tutorial series, [Lesson P35 — "Playing Digital Sound
+with WAV on the AY!"](https://www.chibiakumas.com/z80/platform4.php#LessonP35)
+— the same general approach that lesson teaches for Z80-based AY-3-8910
+systems (Amstrad CPC, MSX, etc.), including its own "ChibiWave
+Converter" tool (WAV → packed 1/2/4-bit-per-sample data) that
+`tools/oric_voiceconv.py` parallels for this project's own pipeline.
+What was adapted, not copied: this project is bare-metal C via Oscar64
+targeting the Oric's 6502 + AY-3-8912 (not Z80 assembly), paces playback
+via the Oric's own VIA Timer 1 IFR polling (see "Playback sequence"
+above) rather than a Z80 delay-loop counter, quantizes to the AY chip's
+full 4-bit/16-level range rather than the lesson's 1/2/4-bit options,
+and adds this project's own register-7 shadow-restore mechanism (see
+"Register 7 restoration" above) — a real bug class specific to this
+codebase's own Arkos player, not something the original lesson needed to
+handle.
 
 Both `assets/voice_welcome.bin` and `assets/voice_thanks.bin` source
 clips are text-to-speech renders via ElevenLabs ("Pepper" voice) — see

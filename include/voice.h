@@ -1,17 +1,30 @@
 // voice.h - AY-3-8912 "digidrums"-style voice-sample playback for Oric Atmos
 //
+// Based on ChibiAkumas's Z80 tutorial series, Lesson P35 "Playing Digital
+// Sound with WAV on the AY!" (chibiakumas.com/z80/platform4.php#LessonP35)
+// -- same general technique (quantize a WAV file down to a low bit depth,
+// mute the channel's tone/noise so only its volume register remains,
+// repeatedly rewrite that register at a paced rate to reconstruct the
+// waveform, silence it when done). Adapted: paced via the Oric's own VIA
+// Timer 1 IFR polling (see voice.c) instead of a Z80 delay-loop counter,
+// written in C via Oscar64 instead of Z80 assembly, and quantized to the
+// AY-3-8912's full 4-bit range (that lesson's own tooling supports
+// 1/2/4-bit) via tools/oric_voiceconv.py instead of its ChibiWave
+// Converter.
+//
 // Two hardcoded voice clips -- "Welcome to Oric Atmos" (played once from
-// section_splash.c's own hold phase) and "Thanks for watching" (played
-// once from section_credits.c) -- played back by rapidly rewriting
-// AY_REG_VOL_A (Channel A's amplitude register) from a pre-quantized
-// sample buffer. The AY chip's own 4-bit/16-level logarithmic volume
-// steps become a crude software DAC once that channel's tone/noise
-// generators are disabled. Expect "recognizable words", not clear
-// speech -- that resolution ceiling is inherent to the hardware,
-// independent of CPU budget or sample rate. See tools/oric_voiceconv.py
-// for the offline WAV->sample conversion and docs/voice.md for the full
-// design writeup (memory budget, register-7 restoration, and why this
-// doesn't depend on which music track is resident).
+// section_logo.c, right after the logo picture loads) and "Thanks for
+// watching" (played once from section_credits.c) -- played back by
+// rapidly rewriting AY_REG_VOL_A (Channel A's amplitude register) from a
+// pre-quantized sample buffer. The AY chip's own 4-bit/16-level
+// logarithmic volume steps become a crude software DAC once that
+// channel's tone/noise generators are disabled. Expect "recognizable
+// words", not clear speech -- that resolution ceiling is inherent to the
+// hardware, independent of CPU budget or sample rate. See
+// tools/oric_voiceconv.py for the offline WAV->sample conversion and
+// docs/voice.md for the full design writeup (memory budget, register-7
+// restoration, and why this doesn't depend on which music track is
+// resident).
 //
 // MEMORY: both clips load into the SAME fixed address, one at a time --
 // they're never resident or playing simultaneously (welcome plays near

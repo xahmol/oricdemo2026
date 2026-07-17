@@ -2,6 +2,16 @@
 """oric_voiceconv.py - convert a mono WAV file into an Oric Atmos AY-3-8912
 "digidrums"-style voice-sample .bin.
 
+Parallels the "ChibiWave Converter" tool from ChibiAkumas's Z80 tutorial
+series, Lesson P35 "Playing Digital Sound with WAV on the AY!"
+(chibiakumas.com/z80/platform4.php#LessonP35) -- same idea (WAV -> packed
+low-bit-depth samples for AY playback), reimplemented here in Python
+(stdlib only) rather than that lesson's own tool, and fixed to the
+AY-3-8912's full 4-bit range rather than its 1/2/4-bit options. See
+include/voice.h's own header comment and docs/voice.md's Attribution
+section for what the ON-ORIC PLAYBACK side (include/voice.c) adapted
+from that same lesson.
+
 Resamples to a target rate (default 4000Hz), trims leading/trailing
 silence, and linearly quantizes each sample to a 4-bit value (0-15) --
 the AY-3-8912's own volume-register resolution. Output is a raw byte
