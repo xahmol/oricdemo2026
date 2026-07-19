@@ -276,6 +276,28 @@ void keyb_scan(void)
  * @return Decoded ASCII/KEY_* code, or KEY_NONE (0) if no non-modifier key
  *         is pressed.
  */
+// PREVENTIVE WORKAROUND for an Oscar64 miscompilation found and confirmed
+// in the sibling project locifilemanager-v2 (identical keyb_decode() body,
+// same shared origin): upstream commit ae7ecb4 ("Optimize switch branch
+// cascade", 2026-07-15) can make this function return the matrix POSITION
+// index (`pos`, e.g. 0x3D for KEY_ENTER's row7/col5 = 7*8+5=61) instead of
+// the decoded key VALUE (`ch`, e.g. 0x0D) at -O2 -- confirmed via a
+// Phosphoric CPU instruction trace in locifilemanager-v2, where it broke
+// all arrow-key-driven menu navigation. keyb_decode() itself has no switch
+// statement (it's if/else-if) -- the corruption is a whole-program
+// register-allocation side effect, not a literal bug in a switch's
+// branches, and is context/register-pressure-dependent (may not reproduce
+// in every binary). Applied here preventively even though this project's
+// own test suite currently passes -- src/main.c's section-advance logic
+// (`keyb_check()` -> `keyb_poll()` -> this) is currently insulated because
+// it only checks truthiness, not the specific key value, but that's a
+// fragile accident, not a guarantee against future code that does care.
+// See locifilemanager-v2's project_oscar64_switch_cascade_regression
+// memory for the full investigation. Do not remove without re-running
+// `make test`/`make test-hires`/`make test-disk` against the current
+// Oscar64.
+#pragma optimize(push)
+#pragma optimize(0)
 uint8_t keyb_decode(void)
 {
     uint8_t mods = 0;
@@ -332,6 +354,7 @@ uint8_t keyb_decode(void)
 
     return KEY_NONE;
 }
+#pragma optimize(pop)
 
 // -------------------------------------------------------------------------
 // keyb_poll -- scan + decode + key repeat
